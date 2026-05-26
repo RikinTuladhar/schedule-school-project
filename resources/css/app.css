@@ -1,11 +1,106 @@
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap');
 @import 'tailwindcss';
 
 @source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
 @source '../../storage/framework/views/*.php';
 @source '../**/*.blade.php';
 @source '../**/*.js';
+@source '../**/*.jsx';
 
 @theme {
-    --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
+    --font-sans: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
         'Segoe UI Symbol', 'Noto Color Emoji';
+    --font-auth: 'Geist', ui-sans-serif, system-ui, sans-serif;
+    --font-display: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+    --font-label: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+
+    --color-on-surface: #1a1c1e;
+    --color-tertiary-fixed: #fbddc4;
+    --color-inverse-surface: #2f3133;
+    --color-on-tertiary-fixed: #281809;
+    --color-surface-tint: #51606a;
+    --color-on-error-container: #93000a;
+    --color-tertiary-fixed-dim: #dec1a9;
+    --color-on-surface-variant: #43474b;
+    --color-tertiary-container: #715b47;
+    --color-on-secondary-fixed: #111d24;
+    --color-on-tertiary-fixed-variant: #574330;
+    --color-on-secondary: #ffffff;
+    --color-background: #f9f9fc;
+    --color-on-background: #1a1c1e;
+    --color-error-container: #ffdad6;
+    --color-primary: #3b4953;
+    --color-primary-fixed-dim: #b9c9d4;
+    --color-surface-bright: #f9f9fc;
+    --color-outline: #73787b;
+    --color-on-primary: #ffffff;
+    --color-primary-fixed: #d5e5f1;
+    --color-outline-variant: #c3c7cb;
+    --color-on-tertiary: #ffffff;
+    --color-surface-container-high: #e8e8ea;
+    --color-surface-container-low: #f3f3f6;
+    --color-on-primary-fixed: #0e1d26;
+    --color-on-secondary-fixed-variant: #3c4850;
+    --color-surface-container: #eeeef0;
+    --color-primary-container: #52616b;
+    --color-surface-variant: #e2e2e5;
+    --color-inverse-on-surface: #f0f0f3;
+    --color-surface-dim: #d9dadc;
+    --color-secondary-fixed-dim: #bbc8d1;
+    --color-on-primary-container: #ccdce7;
+    --color-error: #ba1a1a;
+    --color-secondary-container: #d4e2eb;
+    --color-surface: #f9f9fc;
+    --color-inverse-primary: #b9c9d4;
+    --color-surface-container-highest: #e2e2e5;
+    --color-on-error: #ffffff;
+    --color-on-tertiary-container: #f2d4bb;
+    --color-on-primary-fixed-variant: #3a4952;
+    --color-tertiary: #584431;
+    --color-secondary-fixed: #d7e4ed;
+    --color-surface-container-lowest: #ffffff;
+    --color-on-secondary-container: #58646c;
+    --color-secondary: #546068;
+}
+
+@layer base {
+    body {
+        background: var(--color-background);
+        color: var(--color-on-surface);
+    }
+}
+
+@layer utilities {
+    .hover-lift {
+        transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.2s ease, background-color 0.2s ease,
+            border-color 0.2s ease;
+    }
+
+    .hover-lift:hover {
+        transform: translateY(-4px);
+    }
+
+    .reveal {
+        opacity: 0;
+        transform: translateY(20px);
+        transition: opacity 0.6s ease-out, transform 0.6s ease-out;
+    }
+
+    .reveal.active {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .reveal {
+        opacity: 1;
+        transform: none;
+        transition: none;
+    }
+
+    .hover-lift,
+    .hover-lift:hover {
+        transform: none;
+    }
 }

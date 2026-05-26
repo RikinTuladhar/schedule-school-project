@@ -1,8 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AdminAuthController;
-use App\Http\Controllers\Api\CategoryController;
-use Illuminate\Http\Request;
+use App\Http\Controllers\Api\ClientAuthController;
 use Illuminate\Support\Facades\Route;
 
 // Route::get('/user', function (Request $request) {
@@ -12,16 +11,17 @@ use Illuminate\Support\Facades\Route;
 Route::controller(AdminAuthController::class)->group(function () {
     Route::middleware('auth:sanctum')->group(function () {
         Route::get('/admin/profile', 'profile');
-        Route::get('/admin/logout',  'logout');
+        Route::get('/admin/logout', 'logout');
     });
-    Route::post('/admin/login',  'login');
-    Route::post('/admin/register',  'register');
+    Route::post('/admin/login', 'login');
+    Route::post('/admin/register', 'register');
 });
 
-Route::controller(CategoryController::class)->group(function () {
-    Route::get('/categories', 'index');
-    Route::post('/categories', 'store');
-    Route::get('/categories/{id}', 'show');
-    Route::put('/categories/{id}', 'update');
-    Route::delete('/categories/{id}', 'destroy');
+Route::controller(ClientAuthController::class)->group(function () {
+    Route::middleware('auth:sanctum')->group(function () {
+        Route::get('/client/profile', 'profile');
+        Route::post('/client/logout', 'logout');
+    });
+
+    Route::post('/client/login', 'login');
 });

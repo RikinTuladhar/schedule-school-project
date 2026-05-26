@@ -4,6 +4,11 @@ import laravel from "laravel-vite-plugin";
 import { defineConfig } from "vite";
 
 export default defineConfig({
+    resolve: {
+        alias: {
+            "@": "/resources/js",
+        },
+    },
     plugins: [
         laravel({
             input: ["resources/css/app.css", "resources/js/app.jsx"],
@@ -14,7 +19,13 @@ export default defineConfig({
     ],
     server: {
         watch: {
-            ignored: ["**/storage/framework/views/**"],
+            ignored: [
+                "**/.git/**",
+                "**/node_modules/**",
+                "**/vendor/**",
+                "**/storage/**",
+                "**/public/build/**",
+            ],
         },
     },
 });

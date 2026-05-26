@@ -1,100 +1,61 @@
+import ClientSignInPage from "@/panels/auth/client/ClientSignInPage";
+import ClientForgotPasswordPage from "@/panels/auth/client/ClientForgotPasswordPage";
+import ClientSignUpPage from "@/panels/auth/client/ClientSignUpPage";
+import GuestLayout from "@/panels/guest/layout/GuestLayout";
+import HomePage from "@/panels/guest/pages/HomePage";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { lazy, Suspense } from "react";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
-import AdminLayout from "../layouts/AdminLayout";
-import BrandPage from "../pages/BrandPage";
-import CartPage from "../pages/CartPage";
-import CheckoutPage from "../pages/CheckoutPage";
-import ContactUsPage from "../pages/ContactUsPage";
-import GiftCertificatesPage from "../pages/GiftCertificatesPage";
-import HomePage from "../pages/HomePage";
-import ProductPage from "../pages/ProductPage";
-import SiteMapPage from "../pages/SiteMapPage";
-import SpecialsPage from "../pages/SpecialsPage";
-import AdminLoginPage from "../pages/admin/AdminLoginPage";
-import DashboardPage from "../pages/admin/DashboardPage";
-import PlaceholderPage from "../pages/admin/PlaceholderPage";
-import AddCategoriesPage from "../pages/admin/categories/AddCategoriesPage";
-import CategoriesPage from "../pages/admin/categories/CategoriesPage.";
-import EditCategoriesPage from "../pages/admin/categories/EditCategoriesPage";
+
+const queryClient = new QueryClient();
+const ReactQueryDevtools = import.meta.env.DEV
+    ? lazy(() =>
+          import("@tanstack/react-query-devtools").then((module) => ({
+              default: module.ReactQueryDevtools,
+          })),
+      )
+    : null;
+
+const router = createBrowserRouter([
+    {
+        path: "/",
+        element: <GuestLayout />,
+        children: [
+            {
+                index: true,
+                element: <HomePage />,
+            },
+        ],
+    },
+    {
+        path: "/client/sign-in",
+        element: <ClientSignInPage />,
+    },
+    {
+        path: "/client/sign-up",
+        element: <ClientSignUpPage />,
+    },
+    {
+        path: "/client/forgot-password",
+        element: <ClientForgotPasswordPage />,
+    },
+    {
+        path: "/*",
+        element: <div>Not found</div>,
+    },
+]);
 
 const MyRouter = () => {
-    const router = createBrowserRouter([
-        {
-            path: "/",
-            element: <HomePage />,
-        },
-        {
-            path: "/product/:id",
-            element: <ProductPage />,
-        },
-        {
-            path: "/cart",
-            element: <CartPage />,
-        },
-        {
-            path: "/specials",
-            element: <SpecialsPage />,
-        },
-        {
-            path: "/contact-us",
-            element: <ContactUsPage />,
-        },
-        {
-            path: "/site-map",
-            element: <SiteMapPage />,
-        },
-        {
-            path: "/brands",
-            element: <BrandPage />,
-        },
-        {
-            path: "/gift-certificates",
-            element: <GiftCertificatesPage />,
-        },
-        {
-            path: "/checkout",
-            element: <CheckoutPage />,
-        },
-        {
-            path: "/admin/login",
-            element: <AdminLoginPage />,
-        },
-        {
-            path: "/admin",
-            element: <AdminLayout />,
-            children: [
-                {
-                    index: true,
-                    element: <DashboardPage />,
-                },
-                {
-                    path: "/admin/dashboard",
-                    element: <DashboardPage />,
-                },
-                {
-                    path: "/admin/catalog/categories",
-                    element: <CategoriesPage />,
-                },
-
-                {
-                    path: "/admin/catalog/categories/add",
-                    element: <AddCategoriesPage />,
-                },
-                {
-                    path: "/admin/catalog/categories/edit/:id",
-                    element: <EditCategoriesPage />,
-                },
-                {
-                    path: "*",
-                    element: <PlaceholderPage />,
-                },
-            ],
-        },
-        {
-            path: "/*",
-            element: <div>Not found</div>,
-        },
-    ]);
-    return <RouterProvider router={router} />;
+    return (
+        <QueryClientProvider client={queryClient}>
+            <RouterProvider router={router} />
+            {ReactQueryDevtools ? (
+                <Suspense fallback={null}>
+                    <ReactQueryDevtools initialIsOpen={false} />
+                </Suspense>
+            ) : null}
+        </QueryClientProvider>
+    );
 };
 
 export default MyRouter;
