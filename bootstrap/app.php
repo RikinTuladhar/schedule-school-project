@@ -20,9 +20,15 @@ return Application::configure(basePath: dirname(__DIR__))
 
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->trustProxies(at: '*');
+        $middleware->redirectGuestsTo(function (Request $request): ?string {
+            return $request->is('api/*') ? null : '/client/sign-in';
+        });
     })
 
     ->withExceptions(function (Exceptions $exceptions): void {
+        $exceptions->shouldRenderJsonWhen(function (Request $request): bool {
+            return $request->is('api/*') || $request->expectsJson();
+        });
 
         $exceptions->render(function (
             AuthenticationException $e,

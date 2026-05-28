@@ -1,11 +1,18 @@
-import ClientSignInPage from "@/panels/auth/client/ClientSignInPage";
+import { ClientProvider } from "@/context/ClientContext";
 import ClientForgotPasswordPage from "@/panels/auth/client/ClientForgotPasswordPage";
+import ClientSignInPage from "@/panels/auth/client/ClientSignInPage";
 import ClientSignUpPage from "@/panels/auth/client/ClientSignUpPage";
+import ClientLayout from "@/panels/client/layout/ClientLayout";
+import ClientAssignmentGridPage from "@/panels/client/pages/assignment/ClientAssignmentGridPage";
+import ClientDashboardPage from "@/panels/client/pages/ClientDashboardPage";
+import ClientGradePage from "@/panels/client/pages/grade/ClientGradePage";
+import ClientSubjectPage from "@/panels/client/pages/subject/ClientSubjectPage";
+import ClientTeacherPage from "@/panels/client/pages/teacher/ClientTeacherPage";
 import GuestLayout from "@/panels/guest/layout/GuestLayout";
 import HomePage from "@/panels/guest/pages/HomePage";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { lazy, Suspense } from "react";
-import { createBrowserRouter, RouterProvider } from "react-router-dom";
+import { createBrowserRouter, Navigate, RouterProvider } from "react-router-dom";
 
 const queryClient = new QueryClient();
 const ReactQueryDevtools = import.meta.env.DEV
@@ -40,6 +47,36 @@ const router = createBrowserRouter([
         element: <ClientForgotPasswordPage />,
     },
     {
+        path: "/client",
+        element: <ClientLayout />,
+        children: [
+            {
+                index: true,
+                element: <Navigate to="/client/dashboard" replace />,
+            },
+            {
+                path: "dashboard",
+                element: <ClientDashboardPage />,
+            },
+            {
+                path: "assignment-grid",
+                element: <ClientAssignmentGridPage />,
+            },
+            {
+                path: "grades",
+                element: <ClientGradePage />,
+            },
+            {
+                path: "subjects",
+                element: <ClientSubjectPage />,
+            },
+            {
+                path: "teachers",
+                element: <ClientTeacherPage />,
+            },
+        ],
+    },
+    {
         path: "/*",
         element: <div>Not found</div>,
     },
@@ -48,7 +85,9 @@ const router = createBrowserRouter([
 const MyRouter = () => {
     return (
         <QueryClientProvider client={queryClient}>
-            <RouterProvider router={router} />
+            <ClientProvider>
+                <RouterProvider router={router} />
+            </ClientProvider>
             {ReactQueryDevtools ? (
                 <Suspense fallback={null}>
                     <ReactQueryDevtools initialIsOpen={false} />

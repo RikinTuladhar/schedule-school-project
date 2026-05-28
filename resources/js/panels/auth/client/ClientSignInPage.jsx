@@ -1,26 +1,45 @@
 import { useState } from "react";
 import { ArrowRight, Eye, EyeOff, LockKeyhole, Mail, School } from "lucide-react";
-import { useMutation } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
-import { getApiErrorMessage, signInClient } from "@/apis/auth/client.api";
+import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
+import { getApiErrorMessage, useSignInClient } from "@/apis/auth/client.api";
+import { useClient } from "@/context/ClientContext";
 
 const ClientSignInPage = () => {
     const [showPassword, setShowPassword] = useState(false);
     const [focusedField, setFocusedField] = useState(null);
-    const signInMutation = useMutation({
-        mutationFn: signInClient,
-    });
+    const navigate = useNavigate();
+    const location = useLocation();
+    const { client, isClientLoading, setClientSession } = useClient();
+    const signInMutation = useSignInClient();
+    const from = location.state?.from;
+    const redirectTo =
+        from?.pathname?.startsWith("/client") && !from.pathname.startsWith("/client/sign-in")
+            ? `${from.pathname}${from.search ?? ""}`
+            : "/client/assignment-grid";
 
     const handleSubmit = (event) => {
         event.preventDefault();
 
         const formData = new FormData(event.currentTarget);
 
-        signInMutation.mutate({
-            email: formData.get("email"),
-            password: formData.get("password"),
-        });
+        signInMutation.mutate(
+            {
+                email: formData.get("email"),
+                password: formData.get("password"),
+                remember: formData.get("remember") === "on",
+            },
+            {
+                onSuccess: (authResult) => {
+                    setClientSession(authResult);
+                    navigate(redirectTo, { replace: true });
+                },
+            },
+        );
     };
+
+    if (client && !isClientLoading) {
+        return <Navigate to={redirectTo} replace />;
+    }
 
     return (
         <main className="flex min-h-screen items-center justify-center bg-[#F0F5F9] px-4 py-12 font-auth text-on-surface antialiased md:px-8">

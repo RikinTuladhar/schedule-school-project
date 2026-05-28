@@ -71,6 +71,22 @@
 }
 
 @layer utilities {
+    .input-focus-glow:focus {
+        border-color: var(--color-surface-tint);
+        outline: 2px solid rgb(82 97 107 / 20%);
+        outline-offset: 1px;
+    }
+
+    .schedule-stripes {
+        background-image: repeating-linear-gradient(
+            45deg,
+            transparent,
+            transparent 10px,
+            rgb(82 97 107 / 3%) 10px,
+            rgb(82 97 107 / 3%) 20px
+        );
+    }
+
     .hover-lift {
         transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.2s ease, background-color 0.2s ease,
             border-color 0.2s ease;
