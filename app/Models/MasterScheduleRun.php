@@ -7,27 +7,26 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-class ScheduleTemplate extends Model
+class MasterScheduleRun extends Model
 {
     use HasFactory;
 
     protected $fillable = [
         'school_id',
-        'name',
-        'level',
-        'start_time',
-        'end_time',
-        'grade_ids',
-        'days',
-        'periods',
+        'status',
+        'total_sections',
+        'processed_sections',
+        'failed_sections',
+        'error_message',
+        'started_at',
+        'finished_at',
     ];
 
     protected function casts(): array
     {
         return [
-            'grade_ids' => 'array',
-            'days' => 'array',
-            'periods' => 'array',
+            'started_at' => 'datetime',
+            'finished_at' => 'datetime',
         ];
     }
 
@@ -36,8 +35,8 @@ class ScheduleTemplate extends Model
         return $this->belongsTo(School::class);
     }
 
-    public function gradeSections(): HasMany
+    public function entries(): HasMany
     {
-        return $this->hasMany(GradeSection::class, 'schedule_template_id');
+        return $this->hasMany(MasterScheduleEntry::class);
     }
 }

@@ -38,9 +38,14 @@ class GradeSection extends Model
         return $this->belongsTo(Section::class, 'section_id');
     }
 
+    public function scheduleTemplate(): BelongsTo
+    {
+        return $this->belongsTo(ScheduleTemplate::class, 'schedule_template_id');
+    }
+
     public function getNameAttribute(): string
     {
-        return trim(($this->gradeModel?->name ?? '') . ($this->sectionModel?->name ?? ''));
+        return trim(($this->gradeModel?->name ?? '').($this->sectionModel?->name ?? ''));
     }
 
     public function getGradeAttribute(): ?string

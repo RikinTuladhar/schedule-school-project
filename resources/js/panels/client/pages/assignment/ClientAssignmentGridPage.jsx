@@ -18,6 +18,7 @@ const levelOptions = [
 const periodTypes = [
     { value: "academic", label: "Academic Class" },
     { value: "break", label: "Break" },
+    { value: "assembly", label: "Assembly" },
 ];
 
 const inputClassName =
@@ -464,13 +465,13 @@ const ClientAssignmentGridPage = () => {
 
                         <div className="divide-y divide-outline-variant/20">
                             {form.periods.map((period, index) => {
-                                const isBreak = period.type === "break";
+                                const isBlocked = period.type === "break" || period.type === "assembly";
 
                                 return (
                                     <div
                                         key={period.id}
                                         className={`grid grid-cols-1 gap-3 px-4 py-4 md:grid-cols-[64px_minmax(180px,1fr)_minmax(180px,1fr)_56px] md:items-center ${
-                                            isBreak ? "schedule-stripes bg-secondary-container/40" : "bg-background"
+                                            isBlocked ? "schedule-stripes bg-secondary-container/40" : "bg-background"
                                         }`}
                                     >
                                         <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-surface-container font-label text-sm text-primary">
@@ -496,14 +497,21 @@ const ClientAssignmentGridPage = () => {
                                         </div>
 
                                         <label className="relative block max-w-xs">
-                                            {isBreak ? (
-                                                <Coffee
-                                                    className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-secondary"
-                                                    aria-hidden="true"
-                                                />
+                                            {isBlocked ? (
+                                                period.type === "assembly" ? (
+                                                    <GraduationCap
+                                                        className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-secondary"
+                                                        aria-hidden="true"
+                                                    />
+                                                ) : (
+                                                    <Coffee
+                                                        className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-secondary"
+                                                        aria-hidden="true"
+                                                    />
+                                                )
                                             ) : null}
                                             <select
-                                                className={`${inputClassName} ${isBreak ? "pl-9" : ""}`}
+                                                className={`${inputClassName} ${isBlocked ? "pl-9" : ""}`}
                                                 value={period.type}
                                                 onChange={(event) => updatePeriod(period.id, "type", event.target.value)}
                                             >

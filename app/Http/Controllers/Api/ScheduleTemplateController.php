@@ -112,7 +112,7 @@ class ScheduleTemplateController extends BaseController
             'periods' => ['required', 'array', 'min:1'],
             'periods.*.start' => ['required', 'date_format:H:i'],
             'periods.*.end' => ['required', 'date_format:H:i'],
-            'periods.*.type' => ['required', Rule::in(['academic', 'break'])],
+            'periods.*.type' => ['required', Rule::in(['academic', 'break', 'assembly'])],
         ]);
     }
 

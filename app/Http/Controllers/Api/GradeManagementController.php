@@ -29,7 +29,7 @@ class GradeManagementController extends BaseController
                 ->orderBy('name')
                 ->get(),
             'grade_sections' => GradeSection::query()
-                ->with(['gradeModel', 'sectionModel'])
+                ->with(['gradeModel', 'sectionModel', 'scheduleTemplate'])
                 ->where('school_id', $schoolId)
                 ->latest()
                 ->get(),
@@ -162,7 +162,7 @@ class GradeManagementController extends BaseController
         $gradeSection = GradeSection::create([
             ...$data,
             'school_id' => $schoolId,
-        ])->load(['gradeModel', 'sectionModel']);
+        ])->load(['gradeModel', 'sectionModel', 'scheduleTemplate']);
 
         return $this->sendResponse('Class link created', [
             'grade_section' => $gradeSection,
@@ -179,7 +179,7 @@ class GradeManagementController extends BaseController
         $gradeSection->update($data);
 
         return $this->sendResponse('Class link updated', [
-            'grade_section' => $gradeSection->fresh()->load(['gradeModel', 'sectionModel']),
+            'grade_section' => $gradeSection->fresh()->load(['gradeModel', 'sectionModel', 'scheduleTemplate']),
         ]);
     }
 

@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\AdminAuthController;
 use App\Http\Controllers\Api\ClientAuthController;
 use App\Http\Controllers\Api\GradeManagementController;
+use App\Http\Controllers\Api\MasterScheduleController;
 use App\Http\Controllers\Api\ScheduleTemplateController;
 use App\Http\Controllers\Api\SubjectController;
 use App\Http\Controllers\Api\TeacherController;
@@ -28,6 +29,9 @@ Route::controller(ClientAuthController::class)->group(function () {
         Route::apiResource('subjects', SubjectController::class);
         Route::apiResource('teachers', TeacherController::class);
         Route::apiResource('schedule-templates', ScheduleTemplateController::class);
+        Route::post('/master-schedules/generate', [MasterScheduleController::class, 'generate']);
+        Route::get('/master-schedules/latest', [MasterScheduleController::class, 'latest']);
+        Route::get('/master-schedules/{masterScheduleRun}', [MasterScheduleController::class, 'show']);
     });
 
     Route::post('/client/login', 'login');

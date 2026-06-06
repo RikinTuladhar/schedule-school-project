@@ -30,4 +30,14 @@ class School extends Model
     {
         return $this->hasMany(Client::class);
     }
+
+    public function masterScheduleRuns(): HasMany
+    {
+        return $this->hasMany(MasterScheduleRun::class);
+    }
+
+    public function masterScheduleEntries(): HasMany
+    {
+        return $this->hasMany(MasterScheduleEntry::class);
+    }
 }

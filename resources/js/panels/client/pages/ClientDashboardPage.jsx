@@ -1,130 +1,206 @@
+import { getApiErrorMessage } from "@/apis/auth/client.api";
+import { useGetGradeData } from "@/apis/grade/get.api";
+import { useGetLatestMasterScheduleRun } from "@/apis/master-schedule/get.api";
+import { useGenerateMasterSchedule } from "@/apis/master-schedule/post.api";
+import { useGetScheduleTemplates } from "@/apis/schedule-template/get.api";
 import { Clock3, LoaderCircle, Sparkles, Users, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+const defaultDayOrder = ["M", "T", "W", "Th", "F"];
 
-const timeSlots = [
-    { id: "09:00", label: "09:00 - 10:00", templateType: "academic" },
-    { id: "10:00", label: "10:00 - 11:00", templateType: "academic" },
-    { id: "11:00", label: "11:00 - 11:20", templateType: "break", title: "Morning Break" },
-    { id: "11:20", label: "11:20 - 12:20", templateType: "academic" },
-    { id: "12:20", label: "12:20 - 13:00", templateType: "assembly", title: "Assembly / Advisory" },
-    { id: "13:00", label: "13:00 - 14:00", templateType: "academic" },
-    { id: "14:00", label: "14:00 - 15:00", templateType: "academic" },
-];
-
-const gradeGroups = [
-    {
-        label: "Junior Template (Grades 1-5)",
-        grades: [
-            { id: "grade-1a", name: "Grade 1A" },
-            { id: "grade-1b", name: "Grade 1B" },
-            { id: "grade-2a", name: "Grade 2A" },
-            { id: "grade-4c", name: "Grade 4C" },
-            { id: "grade-5a", name: "Grade 5A" },
-        ],
-    },
-    {
-        label: "Senior Template (Grades 6-10)",
-        grades: [
-            { id: "grade-6a", name: "Grade 6A" },
-            { id: "grade-7b", name: "Grade 7B" },
-            { id: "grade-8a", name: "Grade 8A" },
-            { id: "grade-9c", name: "Grade 9C" },
-            { id: "grade-10a", name: "Grade 10A" },
-        ],
-    },
-];
-
-const baseSchedule = {
-    "grade-1a": {
-        "09:00": {
-            Monday: { subject: "Mathematics", teacher: "Ms. Evelyn Hart" },
-            Tuesday: { subject: "English", teacher: "Mr. Caleb Ross" },
-            Wednesday: { subject: "Science", teacher: "Dr. Nora Kim" },
-            Thursday: { subject: "Mathematics", teacher: "Ms. Evelyn Hart" },
-            Friday: { subject: "Art", teacher: "Ms. Priya Shah" },
-        },
-        "10:00": {
-            Monday: { subject: "English", teacher: "Mr. Caleb Ross" },
-            Wednesday: { subject: "ICT", teacher: "Mr. Omar Blake" },
-            Thursday: { subject: "Science", teacher: "Dr. Nora Kim" },
-        },
-        "11:20": {
-            Monday: { subject: "Social Studies", teacher: "Mrs. Lina Cole" },
-            Tuesday: { subject: "Mathematics", teacher: "Ms. Evelyn Hart" },
-            Friday: { subject: "English", teacher: "Mr. Caleb Ross" },
-        },
-        "13:00": {
-            Tuesday: { subject: "Science Lab", teacher: "Dr. Nora Kim" },
-            Wednesday: { subject: "Mathematics", teacher: "Ms. Evelyn Hart" },
-            Friday: { subject: "Music", teacher: "Mr. Daniel Yu" },
-        },
-        "14:00": {
-            Monday: { subject: "Reading", teacher: "Mrs. Lina Cole" },
-            Thursday: { subject: "ICT", teacher: "Mr. Omar Blake" },
-        },
-    },
-    "grade-6a": {
-        "09:00": {
-            Monday: { subject: "Algebra", teacher: "Mr. Simon Dale" },
-            Tuesday: { subject: "Physics", teacher: "Dr. Asha Menon" },
-            Thursday: { subject: "English", teacher: "Ms. Rachel Lin" },
-        },
-        "10:00": {
-            Monday: { subject: "English", teacher: "Ms. Rachel Lin" },
-            Wednesday: { subject: "Biology", teacher: "Dr. Asha Menon" },
-            Friday: { subject: "Algebra", teacher: "Mr. Simon Dale" },
-        },
-        "11:20": {
-            Tuesday: { subject: "History", teacher: "Mr. Idris Khan" },
-            Wednesday: { subject: "ICT", teacher: "Ms. Mina Park" },
-            Thursday: { subject: "Physics", teacher: "Dr. Asha Menon" },
-        },
-        "13:00": {
-            Monday: { subject: "ICT", teacher: "Ms. Mina Park" },
-            Wednesday: { subject: "English", teacher: "Ms. Rachel Lin" },
-            Friday: { subject: "History", teacher: "Mr. Idris Khan" },
-        },
-    },
+const dayLabels = {
+    M: "Monday",
+    T: "Tuesday",
+    W: "Wednesday",
+    Th: "Thursday",
+    F: "Friday",
 };
 
 const suggestions = [
-    { name: "Ms. Evelyn Hart", match: 96, reason: "Subject load and availability match" },
-    { name: "Mr. Caleb Ross", match: 91, reason: "No back-to-back conflict detected" },
-    { name: "Dr. Nora Kim", match: 87, reason: "Meets grade-level preference" },
+    { name: "Available Teacher A", match: 96, reason: "Subject load and availability match" },
+    { name: "Available Teacher B", match: 91, reason: "No back-to-back conflict detected" },
+    { name: "Available Teacher C", match: 87, reason: "Meets grade-level preference" },
 ];
 
-const getScheduleForGrade = (gradeId) => {
-    if (baseSchedule[gradeId]) {
-        return baseSchedule[gradeId];
+const runningStatuses = new Set(["pending", "processing"]);
+
+const formatLevel = (level) => {
+    if (!level) {
+        return "Template";
     }
 
-    return gradeId.startsWith("grade-1") || gradeId.startsWith("grade-2") || gradeId.startsWith("grade-4")
-        ? baseSchedule["grade-1a"]
-        : baseSchedule["grade-6a"];
+    return `${level.charAt(0).toUpperCase()}${level.slice(1)} Template`;
+};
+
+const formatPeriodType = (type) => {
+    const normalized = String(type || "academic").toLowerCase();
+    return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+};
+
+const buildDays = (template) => {
+    const days = Array.isArray(template?.days) && template.days.length > 0 ? template.days : defaultDayOrder;
+
+    return days.map((day) => ({
+        id: day,
+        label: dayLabels[day] ?? day,
+    }));
+};
+
+const buildTimeSlots = (template) => {
+    if (!Array.isArray(template?.periods) || template.periods.length === 0) {
+        return [];
+    }
+
+    return template.periods.map((period) => {
+        const type = String(period.type || "academic").toLowerCase();
+        const id = `${period.start}-${period.end}`;
+
+        return {
+            id,
+            label: `${period.start} - ${period.end}`,
+            templateType: type,
+            title: type === "academic" ? "" : formatPeriodType(type),
+        };
+    });
+};
+
+const buildScheduleMap = (run, selectedGradeId) => {
+    const schedule = {};
+    const gradeSchedule = run?.schedules?.find(
+        (item) => String(item.grade_section_id) === String(selectedGradeId),
+    );
+
+    (gradeSchedule?.entries ?? []).forEach((entry) => {
+        if (!schedule[entry.time_slot]) {
+            schedule[entry.time_slot] = {};
+        }
+
+        schedule[entry.time_slot][entry.day] = {
+            subject: entry.subject,
+            teacher: entry.teacher,
+        };
+    });
+
+    return schedule;
+};
+
+const buildGradeGroups = (gradeSections, templatesById) => {
+    const groups = new Map();
+
+    gradeSections.forEach((gradeSection) => {
+        const embeddedTemplate = gradeSection.schedule_template ?? gradeSection.scheduleTemplate ?? null;
+        const templateId = gradeSection.schedule_template_id
+            ? String(gradeSection.schedule_template_id)
+            : embeddedTemplate?.id
+              ? String(embeddedTemplate.id)
+              : "";
+        const template = embeddedTemplate ?? templatesById[templateId];
+        const groupKey = templateId || "unassigned";
+        const label = template ? `${template.name} (${formatLevel(template.level)})` : "Unassigned Template";
+
+        if (!groups.has(groupKey)) {
+            groups.set(groupKey, {
+                id: groupKey,
+                label,
+                grades: [],
+            });
+        }
+
+        groups.get(groupKey).grades.push({
+            id: String(gradeSection.id),
+            name: gradeSection.name || [gradeSection.grade, gradeSection.section].filter(Boolean).join(" "),
+            templateId,
+            template,
+        });
+    });
+
+    return Array.from(groups.values()).map((group) => ({
+        ...group,
+        grades: group.grades.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })),
+    }));
+};
+
+const getQueueStatus = (run, isQueueing) => {
+    if (isQueueing) {
+        return "Status: Queueing master schedule job...";
+    }
+
+    if (!run) {
+        return "Status: Ready for generation";
+    }
+
+    const progress = run.total_sections ? `${run.processed_sections + run.failed_sections}/${run.total_sections}` : "0/0";
+
+    if (runningStatuses.has(run.status)) {
+        return `Status: Polling background queue... ${progress}`;
+    }
+
+    if (run.status === "completed") {
+        return `Status: Latest schedule generated successfully (${progress})`;
+    }
+
+    if (run.status === "completed_with_errors") {
+        return `Status: Generated with validation errors (${progress})`;
+    }
+
+    if (run.status === "failed") {
+        return "Status: Generation failed";
+    }
+
+    return `Status: ${run.status}`;
 };
 
 const ClientDashboardPage = () => {
-    const [selectedGradeId, setSelectedGradeId] = useState("grade-1a");
-    const [isGenerating, setIsGenerating] = useState(false);
-    const [queueStatus, setQueueStatus] = useState("Status: Ready for generation");
+    const gradeDataQuery = useGetGradeData();
+    const templatesQuery = useGetScheduleTemplates();
+    const latestRunQuery = useGetLatestMasterScheduleRun({
+        refetchInterval: 4000,
+    });
+    const generateMutation = useGenerateMasterSchedule();
+
+    const [selectedGradeId, setSelectedGradeId] = useState("");
     const [activeSlot, setActiveSlot] = useState(null);
 
-    const selectedGrade = useMemo(() => {
-        return gradeGroups.flatMap((group) => group.grades).find((grade) => grade.id === selectedGradeId);
-    }, [selectedGradeId]);
+    const templatesById = useMemo(() => {
+        return (templatesQuery.data ?? []).reduce((lookup, template) => {
+            lookup[String(template.id)] = template;
+            return lookup;
+        }, {});
+    }, [templatesQuery.data]);
 
-    const schedule = getScheduleForGrade(selectedGradeId);
+    const gradeGroups = useMemo(() => {
+        return buildGradeGroups(gradeDataQuery.data?.gradeSections ?? [], templatesById);
+    }, [gradeDataQuery.data?.gradeSections, templatesById]);
+
+    const gradeOptions = useMemo(() => gradeGroups.flatMap((group) => group.grades), [gradeGroups]);
+
+    useEffect(() => {
+        if (gradeOptions.length === 0) {
+            setSelectedGradeId("");
+            return;
+        }
+
+        if (!gradeOptions.some((grade) => grade.id === selectedGradeId)) {
+            setSelectedGradeId(gradeOptions[0].id);
+        }
+    }, [gradeOptions, selectedGradeId]);
+
+    const selectedGrade = useMemo(() => {
+        return gradeOptions.find((grade) => grade.id === selectedGradeId);
+    }, [gradeOptions, selectedGradeId]);
+
+    const selectedTemplate = selectedGrade?.template ?? (selectedGrade?.templateId ? templatesById[selectedGrade.templateId] : null);
+    const days = useMemo(() => buildDays(selectedTemplate), [selectedTemplate]);
+    const timeSlots = useMemo(() => buildTimeSlots(selectedTemplate), [selectedTemplate]);
+    const gridTemplateColumns = `150px repeat(${Math.max(days.length, 1)}, minmax(170px, 1fr))`;
+    const latestRun = latestRunQuery.data;
+    const schedule = useMemo(() => buildScheduleMap(latestRun, selectedGradeId), [latestRun, selectedGradeId]);
+    const isGenerating = generateMutation.isPending || runningStatuses.has(latestRun?.status);
+    const queueStatus = getQueueStatus(latestRun, generateMutation.isPending);
+    const scheduleError = generateMutation.error || latestRunQuery.error || gradeDataQuery.error || templatesQuery.error;
 
     const handleGenerate = () => {
-        setIsGenerating(true);
-        setQueueStatus("Status: Polling background queue...");
-
-        window.setTimeout(() => {
-            setIsGenerating(false);
-            setQueueStatus("Status: Latest schedule generated successfully");
-        }, 2200);
+        generateMutation.mutate();
     };
 
     return (
@@ -147,7 +223,7 @@ const ClientDashboardPage = () => {
                     <div className="flex flex-col gap-3 sm:items-end">
                         <button
                             type="button"
-                            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-[#52616B] px-6 py-3 font-label text-sm font-semibold text-white shadow-sm transition hover:opacity-95 disabled:cursor-wait"
+                            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-primary px-6 py-3 font-label text-sm font-semibold text-on-primary shadow-sm transition hover:bg-primary/90 disabled:cursor-wait disabled:opacity-80"
                             disabled={isGenerating}
                             onClick={handleGenerate}
                         >
@@ -167,6 +243,11 @@ const ClientDashboardPage = () => {
                             <Clock3 className="h-4 w-4 text-primary" aria-hidden="true" />
                             {queueStatus}
                         </div>
+                        {scheduleError ? (
+                            <p className="max-w-md text-right text-sm text-error">
+                                {getApiErrorMessage(scheduleError, "Unable to load master schedule data.")}
+                            </p>
+                        ) : null}
                     </div>
                 </div>
             </header>
@@ -179,8 +260,20 @@ const ClientDashboardPage = () => {
                     </div>
 
                     <div className="space-y-6">
+                        {gradeDataQuery.isLoading || templatesQuery.isLoading ? (
+                            <div className="rounded-lg bg-surface-container px-4 py-3 text-sm text-on-surface-variant">
+                                Loading grades...
+                            </div>
+                        ) : null}
+
+                        {!gradeDataQuery.isLoading && gradeGroups.length === 0 ? (
+                            <div className="rounded-lg bg-surface-container px-4 py-3 text-sm text-on-surface-variant">
+                                No grade sections found.
+                            </div>
+                        ) : null}
+
                         {gradeGroups.map((group) => (
-                            <div key={group.label}>
+                            <div key={group.id}>
                                 <div className="mb-2 px-2 font-label text-xs uppercase tracking-wider text-primary">
                                     {group.label}
                                 </div>
@@ -194,14 +287,14 @@ const ClientDashboardPage = () => {
                                                 type="button"
                                                 className={`flex w-full items-center justify-between rounded-lg px-4 py-3 text-left text-sm font-semibold transition ${
                                                     isSelected
-                                                        ? "bg-[#52616B] text-white"
-                                                        : "text-on-surface hover:bg-[#C9D6DF]"
+                                                        ? "bg-primary text-on-primary"
+                                                        : "text-on-surface hover:bg-surface-container-highest"
                                                 }`}
                                                 onClick={() => setSelectedGradeId(grade.id)}
                                             >
                                                 {grade.name}
                                                 {isSelected ? (
-                                                    <span className="rounded-full bg-white px-2 py-0.5 font-label text-[10px] uppercase text-[#52616B]">
+                                                    <span className="rounded-full bg-on-primary px-2 py-0.5 font-label text-[10px] uppercase text-primary">
                                                         Active
                                                     </span>
                                                 ) : null}
@@ -221,102 +314,120 @@ const ClientDashboardPage = () => {
                                 {selectedGrade?.name ?? "Selected Grade"} Timetable
                             </h3>
                             <p className="text-sm text-on-surface-variant">
-                                Monday to Friday schedule with hard template constraints.
+                                Schedule rows come from the assigned template periods.
                             </p>
                         </div>
-                        <div className="rounded-lg bg-[#C9D6DF] px-3 py-2 font-label text-xs text-[#52616B]">
+                        <div className="rounded-lg bg-secondary px-3 py-2 font-label text-xs text-on-secondary">
                             Empty cells are Copilot-enabled drop zones
                         </div>
                     </div>
 
-                    <div className="overflow-x-auto">
-                        <div className="min-w-[980px]">
-                            <div className="grid grid-cols-[150px_repeat(5,minmax(170px,1fr))] border-b border-outline-variant/30 bg-surface-container">
-                                <div className="px-4 py-3 font-label text-xs uppercase text-primary">Time</div>
-                                {days.map((day) => (
-                                    <div
-                                        key={day}
-                                        className="border-l border-outline-variant/30 px-4 py-3 text-center font-label text-xs uppercase text-primary"
-                                    >
-                                        {day}
-                                    </div>
-                                ))}
-                            </div>
-
-                            {timeSlots.map((slot) => {
-                                const isBlocked = slot.templateType !== "academic";
-
-                                return (
-                                    <div
-                                        key={slot.id}
-                                        className={`grid grid-cols-[150px_repeat(5,minmax(170px,1fr))] border-b border-outline-variant/20 ${
-                                            isBlocked ? "schedule-stripes bg-[#C9D6DF]/70 opacity-80" : "bg-background"
-                                        }`}
-                                    >
-                                        <div className="flex min-h-28 items-center px-4">
-                                            <div>
-                                                <div className="font-label text-sm text-on-surface">{slot.label}</div>
-                                                {isBlocked ? (
-                                                    <div className="mt-1 font-label text-xs uppercase text-[#52616B]">
-                                                        {slot.title}
-                                                    </div>
-                                                ) : null}
-                                            </div>
+                    {gradeOptions.length === 0 ? (
+                        <div className="flex min-h-[420px] items-center justify-center px-6 text-sm text-on-surface-variant">
+                            Create grade-section links before generating a master schedule.
+                        </div>
+                    ) : timeSlots.length === 0 ? (
+                        <div className="flex min-h-[420px] items-center justify-center px-6 text-sm text-on-surface-variant">
+                            Assign a schedule template with periods to this grade section.
+                        </div>
+                    ) : (
+                        <div className="overflow-x-auto">
+                            <div className="min-w-[980px]">
+                                <div
+                                    className="grid border-b border-outline-variant/30 bg-surface-container"
+                                    style={{ gridTemplateColumns }}
+                                >
+                                    <div className="px-4 py-3 font-label text-xs uppercase text-primary">Time</div>
+                                    {days.map((day) => (
+                                        <div
+                                            key={day.id}
+                                            className="border-l border-outline-variant/30 px-4 py-3 text-center font-label text-xs uppercase text-primary"
+                                        >
+                                            {day.label}
                                         </div>
+                                    ))}
+                                </div>
 
-                                        {days.map((day) => {
-                                            const assignment = schedule[slot.id]?.[day];
+                                {timeSlots.map((slot) => {
+                                    const isBlocked = slot.templateType !== "academic";
 
-                                            if (isBlocked) {
+                                    return (
+                                        <div
+                                            key={slot.id}
+                                            className={`grid border-b border-outline-variant/20 ${
+                                                isBlocked
+                                                    ? "schedule-stripes bg-surface-container-highest opacity-80"
+                                                    : "bg-background"
+                                            }`}
+                                            style={{ gridTemplateColumns }}
+                                        >
+                                            <div className="flex min-h-28 items-center px-4">
+                                                <div>
+                                                    <div className="font-label text-sm text-on-surface">
+                                                        {slot.label}
+                                                    </div>
+                                                    {isBlocked ? (
+                                                        <div className="mt-1 font-label text-xs uppercase text-primary">
+                                                            {slot.title}
+                                                        </div>
+                                                    ) : null}
+                                                </div>
+                                            </div>
+
+                                            {days.map((day) => {
+                                                const assignment = schedule[slot.id]?.[day.id];
+
+                                                if (isBlocked) {
+                                                    return (
+                                                        <div
+                                                            key={`${slot.id}-${day.id}`}
+                                                            className="flex min-h-28 items-center justify-center border-l border-outline-variant/30 px-3 py-3"
+                                                        >
+                                                            <span className="rounded-lg bg-white/70 px-3 py-2 font-label text-xs uppercase text-primary">
+                                                                Not droppable
+                                                            </span>
+                                                        </div>
+                                                    );
+                                                }
+
                                                 return (
                                                     <div
-                                                        key={`${slot.id}-${day}`}
-                                                        className="flex min-h-28 items-center justify-center border-l border-outline-variant/30 px-3 py-3"
+                                                        key={`${slot.id}-${day.id}`}
+                                                        className="min-h-28 border-l border-outline-variant/30 px-3 py-3"
                                                     >
-                                                        <span className="rounded-lg bg-white/70 px-3 py-2 font-label text-xs uppercase text-[#52616B]">
-                                                            Not droppable
-                                                        </span>
+                                                        {assignment ? (
+                                                            <article className="h-full rounded-xl bg-white p-4 shadow-sm ring-1 ring-outline-variant/30">
+                                                                <h4 className="font-semibold text-on-surface">
+                                                                    {assignment.subject}
+                                                                </h4>
+                                                                <p className="mt-2 text-sm text-on-surface-variant">
+                                                                    {assignment.teacher}
+                                                                </p>
+                                                            </article>
+                                                        ) : (
+                                                            <button
+                                                                type="button"
+                                                                className="flex h-full min-h-20 w-full items-center justify-center rounded-xl border border-dashed border-primary bg-surface-container-lowest px-3 py-4 text-center font-label text-xs uppercase text-primary transition hover:bg-surface-container-highest"
+                                                                onClick={() =>
+                                                                    setActiveSlot({
+                                                                        day: day.label,
+                                                                        time: slot.label,
+                                                                        grade: selectedGrade?.name ?? "Selected Grade",
+                                                                    })
+                                                                }
+                                                            >
+                                                                Empty Slot
+                                                            </button>
+                                                        )}
                                                     </div>
                                                 );
-                                            }
-
-                                            return (
-                                                <div
-                                                    key={`${slot.id}-${day}`}
-                                                    className="min-h-28 border-l border-outline-variant/30 px-3 py-3"
-                                                >
-                                                    {assignment ? (
-                                                        <article className="h-full rounded-xl bg-white p-4 shadow-sm ring-1 ring-outline-variant/30">
-                                                            <h4 className="font-semibold text-on-surface">
-                                                                {assignment.subject}
-                                                            </h4>
-                                                            <p className="mt-2 text-sm text-on-surface-variant">
-                                                                {assignment.teacher}
-                                                            </p>
-                                                        </article>
-                                                    ) : (
-                                                        <button
-                                                            type="button"
-                                                            className="flex h-full min-h-20 w-full items-center justify-center rounded-xl border border-dashed border-[#52616B] bg-surface-container-lowest px-3 py-4 text-center font-label text-xs uppercase text-[#52616B] transition hover:bg-[#C9D6DF]"
-                                                            onClick={() =>
-                                                                setActiveSlot({
-                                                                    day,
-                                                                    time: slot.label,
-                                                                    grade: selectedGrade?.name ?? "Selected Grade",
-                                                                })
-                                                            }
-                                                        >
-                                                            Empty Slot
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                );
-                            })}
+                                            })}
+                                        </div>
+                                    );
+                                })}
+                            </div>
                         </div>
-                    </div>
+                    )}
                 </main>
             </section>
 
@@ -325,7 +436,7 @@ const ClientDashboardPage = () => {
                     <section className="w-full max-w-lg rounded-xl bg-surface-container-lowest p-6 shadow-xl">
                         <div className="mb-5 flex items-start justify-between gap-4">
                             <div className="flex gap-3">
-                                <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#52616B] text-white">
+                                <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary text-on-primary">
                                     <Users className="h-5 w-5" aria-hidden="true" />
                                 </span>
                                 <div>
@@ -337,7 +448,7 @@ const ClientDashboardPage = () => {
                             </div>
                             <button
                                 type="button"
-                                className="flex h-9 w-9 items-center justify-center rounded-lg text-on-surface-variant transition hover:bg-[#C9D6DF]"
+                                className="flex h-9 w-9 items-center justify-center rounded-lg text-on-surface-variant transition hover:bg-surface-container-highest"
                                 aria-label="Close suggestions"
                                 onClick={() => setActiveSlot(null)}
                             >
@@ -354,7 +465,7 @@ const ClientDashboardPage = () => {
                                     <div>
                                         <div className="flex flex-wrap items-center gap-2">
                                             <h4 className="font-semibold text-on-surface">{teacher.name}</h4>
-                                            <span className="rounded-full bg-[#C9D6DF] px-2.5 py-1 font-label text-xs font-semibold text-[#52616B]">
+                                            <span className="rounded-full bg-secondary px-2.5 py-1 font-label text-xs font-semibold text-on-secondary">
                                                 {teacher.match}% match
                                             </span>
                                         </div>
@@ -362,7 +473,7 @@ const ClientDashboardPage = () => {
                                     </div>
                                     <button
                                         type="button"
-                                        className="rounded-lg bg-[#52616B] px-4 py-2 font-label text-xs font-semibold text-white transition hover:opacity-95"
+                                        className="rounded-lg bg-primary px-4 py-2 font-label text-xs font-semibold text-on-primary transition hover:bg-primary/90"
                                         onClick={() => setActiveSlot(null)}
                                     >
                                         Assign
