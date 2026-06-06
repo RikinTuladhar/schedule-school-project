@@ -8,7 +8,7 @@ import { BookOpen, Plus, Save, X } from "lucide-react";
 import { useState } from "react";
 
 const inputClassName =
-    "w-full rounded-xl border border-[#52616B] bg-[#F0F5F9] px-4 py-3 text-sm text-[#1E2022] outline-none transition focus:border-[#52616B] focus:ring-2 focus:ring-[#52616B]";
+    "w-full rounded-xl border border-primary bg-background px-4 py-3 text-sm text-on-surface outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20";
 
 const ClientSubjectPage = () => {
     const subjectsQuery = useGetSubjects();
@@ -91,59 +91,59 @@ const ClientSubjectPage = () => {
     };
 
     return (
-        <div className="min-h-screen rounded-xl bg-[#F0F5F9] p-1 text-[#1E2022]">
+        <div className="min-h-screen rounded-xl bg-background p-1 text-on-surface">
             <div className="mx-auto max-w-[1440px] space-y-6">
                 <section>
-                    <p className="font-label text-xs uppercase tracking-wider text-[#52616B]">Master Data</p>
-                    <h1 className="mt-2 text-3xl font-semibold text-[#1E2022]">Subject Management</h1>
-                    <p className="mt-2 max-w-3xl text-sm leading-6 text-[#52616B]">
+                    <p className="font-label text-xs uppercase tracking-wider text-primary">Master Data</p>
+                    <h1 className="mt-2 text-3xl font-semibold text-on-surface">Subject Management</h1>
+                    <p className="mt-2 max-w-3xl text-sm leading-6 text-primary">
                         Maintain the subject catalog used by class templates, teacher assignments, and AI scheduling
                         constraints. School scope is inherited from the active tenant session.
                     </p>
                 </section>
 
                 {subjectsQuery.isError ? (
-                    <div className="rounded-xl border border-[#52616B] bg-[#C9D6DF] p-4 text-sm text-[#1E2022] shadow-sm">
+                    <div className="rounded-xl border border-primary bg-surface-container p-4 text-sm text-on-surface shadow-sm">
                         {getApiErrorMessage(subjectsQuery.error, "Unable to load subjects.")}
                     </div>
                 ) : null}
 
                 {formError ? (
-                    <div className="rounded-xl border border-[#52616B] bg-[#C9D6DF] p-4 text-sm text-[#1E2022] shadow-sm">
+                    <div className="rounded-xl border border-primary bg-surface-container p-4 text-sm text-on-surface shadow-sm">
                         {getApiErrorMessage(formError, "Unable to save subject.")}
                     </div>
                 ) : null}
 
                 {deleteSubjectMutation.isError ? (
-                    <div className="rounded-xl border border-[#52616B] bg-[#C9D6DF] p-4 text-sm text-[#1E2022] shadow-sm">
+                    <div className="rounded-xl border border-primary bg-surface-container p-4 text-sm text-on-surface shadow-sm">
                         {getApiErrorMessage(deleteSubjectMutation.error, "Unable to delete subject.")}
                     </div>
                 ) : null}
 
                 {statusMessage ? (
-                    <div className="rounded-xl border border-[#52616B] bg-[#C9D6DF] p-4 text-sm font-semibold text-[#1E2022] shadow-sm">
+                    <div className="rounded-xl border border-primary bg-surface-container p-4 text-sm font-semibold text-on-surface shadow-sm">
                         {statusMessage}
                     </div>
                 ) : null}
 
-                <form className="rounded-xl bg-[#C9D6DF] p-5 shadow-sm" onSubmit={handleAddSubject}>
+                <form className="rounded-xl bg-surface-container p-5 shadow-sm" onSubmit={handleAddSubject}>
                     <div className="mb-5 flex flex-col justify-between gap-4 md:flex-row md:items-start">
                         <div className="flex items-center gap-3">
-                            <span className="rounded-xl bg-[#52616B] p-2 text-[#F0F5F9]">
+                            <span className="rounded-xl bg-primary p-2 text-on-primary">
                                 <BookOpen className="h-5 w-5" aria-hidden="true" />
                             </span>
                             <div>
                                 <h2 className="text-xl font-semibold">
                                     {editingSubjectId ? "Edit Subject" : "Add New Subject"}
                                 </h2>
-                                <p className="text-sm text-[#52616B]">Subject name is required. Status defaults active.</p>
+                                <p className="text-sm text-primary">Subject name is required. Status defaults active.</p>
                             </div>
                         </div>
 
                         {editingSubjectId ? (
                             <button
                                 type="button"
-                                className="inline-flex items-center justify-center gap-2 rounded-xl border border-[#52616B] px-4 py-3 text-sm font-semibold text-[#1E2022] shadow-sm transition hover:bg-[#F0F5F9]"
+                                className="inline-flex items-center justify-center gap-2 rounded-xl border border-primary px-4 py-3 text-sm font-semibold text-on-surface shadow-sm transition hover:bg-background"
                                 onClick={resetForm}
                             >
                                 <X className="h-4 w-4" aria-hidden="true" />
@@ -178,7 +178,7 @@ const ClientSubjectPage = () => {
 
                         <button
                             type="submit"
-                            className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#52616B] px-5 py-3 text-sm font-semibold text-[#F0F5F9] shadow-sm transition hover:bg-[#52616B] disabled:cursor-not-allowed disabled:opacity-70"
+                            className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-on-primary shadow-sm transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-70"
                             disabled={isSaving}
                         >
                             <Plus className="h-4 w-4" aria-hidden="true" />
@@ -186,10 +186,10 @@ const ClientSubjectPage = () => {
                         </button>
                     </div>
 
-                    <div className="sticky bottom-0 mt-5 flex justify-end bg-[#C9D6DF] pt-4">
+                    <div className="sticky bottom-0 mt-5 flex justify-end bg-surface-container pt-4">
                         <button
                             type="submit"
-                            className="inline-flex items-center justify-center gap-2 rounded-xl border border-[#52616B] px-4 py-3 text-sm font-semibold text-[#1E2022] shadow-sm transition hover:bg-[#F0F5F9] disabled:cursor-not-allowed disabled:opacity-70"
+                            className="inline-flex items-center justify-center gap-2 rounded-xl border border-primary px-4 py-3 text-sm font-semibold text-on-surface shadow-sm transition hover:bg-background disabled:cursor-not-allowed disabled:opacity-70"
                             disabled={isSaving}
                         >
                             <Save className="h-4 w-4" aria-hidden="true" />
@@ -223,7 +223,7 @@ const ClientSubjectPage = () => {
                             key: "status",
                             label: "Status",
                             render: (record) => (
-                                <span className="rounded-xl border border-[#52616B] px-3 py-1 text-xs font-semibold capitalize text-[#52616B]">
+                                <span className="rounded-xl border border-primary px-3 py-1 text-xs font-semibold capitalize text-primary">
                                     {record.status}
                                 </span>
                             ),
@@ -236,3 +236,4 @@ const ClientSubjectPage = () => {
 };
 
 export default ClientSubjectPage;
+

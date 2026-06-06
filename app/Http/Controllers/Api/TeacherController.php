@@ -47,7 +47,7 @@ class TeacherController extends BaseController
         }
 
         $teacher = Teacher::create([
-            ...$this->validatedPayload($request),
+            ...$this->validatedPayload($request, $schoolId),
             'school_id' => $schoolId,
         ]);
 
@@ -73,7 +73,7 @@ class TeacherController extends BaseController
             return $this->sendErrorResponse('Teacher not found.', [], 404);
         }
 
-        $teacher->update($this->validatedPayload($request));
+        $teacher->update($this->validatedPayload($request, (int) $teacher->school_id));
 
         return $this->sendResponse('Teacher updated', [
             'teacher' => $teacher->fresh(),
@@ -91,7 +91,7 @@ class TeacherController extends BaseController
         return $this->sendResponse('Teacher deleted');
     }
 
-    private function validatedPayload(Request $request): array
+    private function validatedPayload(Request $request, int $schoolId): array
     {
         return $request->validate([
             'full_name' => ['required', 'string', 'max:255'],
@@ -103,8 +103,18 @@ class TeacherController extends BaseController
             'availability.*.start_time' => ['nullable', 'date_format:H:i'],
             'availability.*.end_time' => ['nullable', 'date_format:H:i'],
             'assignments' => ['nullable', 'array'],
-            'assignments.*.subject_id' => ['required', 'string', 'max:255'],
-            'assignments.*.grade_section_id' => ['required', 'string', 'max:255'],
+            'assignments.*.subject_id' => [
+                'required',
+                'integer',
+                Rule::exists('subjects', 'id')
+                    ->where('school_id', $schoolId)
+                    ->where('status', 'active'),
+            ],
+            'assignments.*.grade_section_id' => [
+                'required',
+                'integer',
+                Rule::exists('grade_sections', 'id')->where('school_id', $schoolId),
+            ],
             'assignments.*.sessions_per_week' => ['required', 'integer', 'min:1', 'max:40'],
             'assignments.*.max_sessions_per_day' => ['required', 'integer', 'min:1', 'max:12'],
         ]);

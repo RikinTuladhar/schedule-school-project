@@ -216,7 +216,11 @@ class GradeManagementController extends BaseController
                 Rule::exists('sections', 'id')->where('school_id', $schoolId),
                 $uniqueSectionForGrade,
             ],
-            'schedule_template_id' => ['required', 'string', 'max:255'],
+            'schedule_template_id' => [
+                'required',
+                'integer',
+                Rule::exists('schedule_templates', 'id')->where('school_id', $schoolId),
+            ],
         ]);
     }
 

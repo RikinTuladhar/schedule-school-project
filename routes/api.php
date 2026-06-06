@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\AdminAuthController;
 use App\Http\Controllers\Api\ClientAuthController;
 use App\Http\Controllers\Api\GradeManagementController;
+use App\Http\Controllers\Api\ScheduleTemplateController;
 use App\Http\Controllers\Api\SubjectController;
 use App\Http\Controllers\Api\TeacherController;
 use Illuminate\Support\Facades\Route;
@@ -26,6 +27,7 @@ Route::controller(ClientAuthController::class)->group(function () {
         Route::post('/client/logout', 'logout');
         Route::apiResource('subjects', SubjectController::class);
         Route::apiResource('teachers', TeacherController::class);
+        Route::apiResource('schedule-templates', ScheduleTemplateController::class);
     });
 
     Route::post('/client/login', 'login');

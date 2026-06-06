@@ -14,53 +14,53 @@
     --font-display: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
     --font-label: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
 
-    --color-on-surface: #1a1c1e;
-    --color-tertiary-fixed: #fbddc4;
-    --color-inverse-surface: #2f3133;
-    --color-on-tertiary-fixed: #281809;
-    --color-surface-tint: #51606a;
+    --color-on-surface: #0f3246;
+    --color-tertiary-fixed: #ffedd5;
+    --color-inverse-surface: #12384c;
+    --color-on-tertiary-fixed: #431407;
+    --color-surface-tint: #0284c7;
     --color-on-error-container: #93000a;
     --color-tertiary-fixed-dim: #dec1a9;
-    --color-on-surface-variant: #43474b;
-    --color-tertiary-container: #715b47;
-    --color-on-secondary-fixed: #111d24;
-    --color-on-tertiary-fixed-variant: #574330;
-    --color-on-secondary: #ffffff;
-    --color-background: #f9f9fc;
-    --color-on-background: #1a1c1e;
+    --color-on-surface-variant: #38657a;
+    --color-tertiary-container: #fed7aa;
+    --color-on-secondary-fixed: #422006;
+    --color-on-tertiary-fixed-variant: #9a3412;
+    --color-on-secondary: #422006;
+    --color-background: #f4fbff;
+    --color-on-background: #0f3246;
     --color-error-container: #ffdad6;
-    --color-primary: #3b4953;
-    --color-primary-fixed-dim: #b9c9d4;
-    --color-surface-bright: #f9f9fc;
-    --color-outline: #73787b;
+    --color-primary: #0284c7;
+    --color-primary-fixed-dim: #7dd3fc;
+    --color-surface-bright: #ffffff;
+    --color-outline: #6aa9c8;
     --color-on-primary: #ffffff;
-    --color-primary-fixed: #d5e5f1;
-    --color-outline-variant: #c3c7cb;
-    --color-on-tertiary: #ffffff;
-    --color-surface-container-high: #e8e8ea;
-    --color-surface-container-low: #f3f3f6;
-    --color-on-primary-fixed: #0e1d26;
-    --color-on-secondary-fixed-variant: #3c4850;
-    --color-surface-container: #eeeef0;
-    --color-primary-container: #52616b;
-    --color-surface-variant: #e2e2e5;
-    --color-inverse-on-surface: #f0f0f3;
-    --color-surface-dim: #d9dadc;
-    --color-secondary-fixed-dim: #bbc8d1;
-    --color-on-primary-container: #ccdce7;
+    --color-primary-fixed: #bae6fd;
+    --color-outline-variant: #c7e5f4;
+    --color-on-tertiary: #431407;
+    --color-surface-container-high: #dff3fc;
+    --color-surface-container-low: #edf9ff;
+    --color-on-primary-fixed: #083344;
+    --color-on-secondary-fixed-variant: #713f12;
+    --color-surface-container: #e5f6ff;
+    --color-primary-container: #38bdf8;
+    --color-surface-variant: #d4eefb;
+    --color-inverse-on-surface: #eaf8ff;
+    --color-surface-dim: #ccecf9;
+    --color-secondary-fixed-dim: #fde68a;
+    --color-on-primary-container: #082f49;
     --color-error: #ba1a1a;
-    --color-secondary-container: #d4e2eb;
-    --color-surface: #f9f9fc;
-    --color-inverse-primary: #b9c9d4;
-    --color-surface-container-highest: #e2e2e5;
+    --color-secondary-container: #fef3c7;
+    --color-surface: #f4fbff;
+    --color-inverse-primary: #7dd3fc;
+    --color-surface-container-highest: #cdeffd;
     --color-on-error: #ffffff;
-    --color-on-tertiary-container: #f2d4bb;
-    --color-on-primary-fixed-variant: #3a4952;
-    --color-tertiary: #584431;
-    --color-secondary-fixed: #d7e4ed;
+    --color-on-tertiary-container: #7c2d12;
+    --color-on-primary-fixed-variant: #0369a1;
+    --color-tertiary: #f97316;
+    --color-secondary-fixed: #fef08a;
     --color-surface-container-lowest: #ffffff;
-    --color-on-secondary-container: #58646c;
-    --color-secondary: #546068;
+    --color-on-secondary-container: #713f12;
+    --color-secondary: #facc15;
 }
 
 @layer base {
@@ -73,7 +73,7 @@
 @layer utilities {
     .input-focus-glow:focus {
         border-color: var(--color-surface-tint);
-        outline: 2px solid rgb(82 97 107 / 20%);
+        outline: 2px solid rgb(2 132 199 / 20%);
         outline-offset: 1px;
     }
 
@@ -82,8 +82,8 @@
             45deg,
             transparent,
             transparent 10px,
-            rgb(82 97 107 / 3%) 10px,
-            rgb(82 97 107 / 3%) 20px
+            rgb(2 132 199 / 4%) 10px,
+            rgb(2 132 199 / 4%) 20px
         );
     }
 

@@ -42,7 +42,7 @@ const ClientSignInPage = () => {
     }
 
     return (
-        <main className="flex min-h-screen items-center justify-center bg-[#F0F5F9] px-4 py-12 font-auth text-on-surface antialiased md:px-8">
+        <main className="flex min-h-screen items-center justify-center bg-background px-4 py-12 font-auth text-on-surface antialiased md:px-8">
             <div className="w-full max-w-[440px]">
                 <div className="mb-8 flex flex-col items-center text-center">
                     <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-xl bg-primary-container text-on-primary shadow-sm">
@@ -52,7 +52,7 @@ const ClientSignInPage = () => {
                     <p className="mt-1 font-label text-sm uppercase tracking-wider text-outline">Admin Terminal Access</p>
                 </div>
 
-                <section className="rounded-xl border border-outline-variant/30 bg-surface-container-lowest p-8 shadow-[0px_4px_20px_rgba(82,97,107,0.06)]">
+                <section className="rounded-xl border border-outline-variant/30 bg-surface-container-lowest p-8 shadow-[0px_4px_20px_rgba(2,132,199,0.08)]">
                     <form className="space-y-6" onSubmit={handleSubmit}>
                         {signInMutation.isError ? (
                             <div className="rounded-lg border border-error/20 bg-error-container px-4 py-3 text-sm text-on-error-container">
@@ -198,3 +198,4 @@ const ClientSignInPage = () => {
 };
 
 export default ClientSignInPage;
+

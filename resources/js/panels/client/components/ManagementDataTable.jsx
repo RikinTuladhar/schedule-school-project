@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 const PAGE_SIZE = 10;
 
 const inputClassName =
-    "rounded-xl border border-[#52616B] bg-[#F0F5F9] px-4 py-2 text-sm text-[#1E2022] outline-none transition focus:border-[#52616B] focus:ring-2 focus:ring-[#52616B]";
+    "rounded-xl border border-primary bg-background px-4 py-2 text-sm text-on-surface outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20";
 
 const ManagementDataTable = ({
     title,
@@ -55,18 +55,18 @@ const ManagementDataTable = ({
     const isDebouncing = searchValue.trim().toLowerCase() !== debouncedSearch;
 
     return (
-        <section className="rounded-xl bg-[#C9D6DF] p-5 text-[#1E2022] shadow-sm">
+        <section className="rounded-xl bg-surface-container p-5 text-on-surface shadow-sm">
             <div className="mb-5 flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
                 <div>
-                    <h2 className="text-2xl font-semibold text-[#1E2022]">{title}</h2>
-                    {description ? <p className="mt-1 text-sm text-[#52616B]">{description}</p> : null}
+                    <h2 className="text-2xl font-semibold text-on-surface">{title}</h2>
+                    {description ? <p className="mt-1 text-sm text-primary">{description}</p> : null}
                 </div>
 
                 <div className="flex flex-col gap-3 sm:flex-row">
                     <label className="relative min-w-0 sm:w-72">
                         <span className="sr-only">Search records</span>
                         <Search
-                            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#52616B]"
+                            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-primary"
                             aria-hidden="true"
                         />
                         <input
@@ -77,7 +77,7 @@ const ManagementDataTable = ({
                             type="search"
                         />
                         {isDebouncing ? (
-                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[#52616B]">
+                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-primary">
                                 Searching
                             </span>
                         ) : null}
@@ -102,15 +102,15 @@ const ManagementDataTable = ({
 
             <div className="overflow-hidden rounded-xl shadow-sm">
                 <div className="overflow-x-auto">
-                    <table className="min-w-full border-collapse bg-[#C9D6DF] text-left text-sm text-[#1E2022]">
-                        <thead className="bg-[#C9D6DF]">
+                    <table className="min-w-full border-collapse bg-surface-container text-left text-sm text-on-surface">
+                        <thead className="bg-surface-container">
                             <tr>
                                 {columns.map((column) => (
-                                    <th key={column.key} className="px-4 py-3 font-semibold text-[#1E2022]">
+                                    <th key={column.key} className="px-4 py-3 font-semibold text-on-surface">
                                         {column.label}
                                     </th>
                                 ))}
-                                <th className="px-4 py-3 text-right font-semibold text-[#1E2022]">Actions</th>
+                                <th className="px-4 py-3 text-right font-semibold text-on-surface">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -118,7 +118,7 @@ const ManagementDataTable = ({
                                 pageRecords.map((record) => (
                                     <tr
                                         key={record.id}
-                                        className="border-b border-[#52616B]/20 transition hover:bg-[#F0F5F9]"
+                                        className="border-b border-primary/20 transition hover:bg-background"
                                     >
                                         {columns.map((column) => (
                                             <td key={column.key} className="px-4 py-3">
@@ -129,7 +129,7 @@ const ManagementDataTable = ({
                                             <div className="flex justify-end gap-2">
                                                 <button
                                                     type="button"
-                                                    className="inline-flex items-center gap-2 rounded-xl bg-[#52616B] px-3 py-2 text-xs font-semibold text-[#F0F5F9] transition hover:bg-[#52616B]"
+                                                    className="inline-flex items-center gap-2 rounded-xl bg-primary px-3 py-2 text-xs font-semibold text-on-primary transition hover:bg-primary/90"
                                                     onClick={() => onEdit?.(record)}
                                                 >
                                                     <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
@@ -138,7 +138,7 @@ const ManagementDataTable = ({
                                                 {onDelete ? (
                                                     <button
                                                         type="button"
-                                                        className="inline-flex items-center gap-2 rounded-xl border border-[#52616B] px-3 py-2 text-xs font-semibold text-[#52616B] transition hover:bg-[#F0F5F9]"
+                                                        className="inline-flex items-center gap-2 rounded-xl border border-primary px-3 py-2 text-xs font-semibold text-primary transition hover:bg-background"
                                                         onClick={() => onDelete(record)}
                                                     >
                                                         <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
@@ -151,7 +151,7 @@ const ManagementDataTable = ({
                                 ))
                             ) : (
                                 <tr>
-                                    <td colSpan={columns.length + 1} className="px-4 py-10 text-center text-[#52616B]">
+                                    <td colSpan={columns.length + 1} className="px-4 py-10 text-center text-primary">
                                         No matching records found.
                                     </td>
                                 </tr>
@@ -161,26 +161,26 @@ const ManagementDataTable = ({
                 </div>
             </div>
 
-            <div className="mt-5 flex flex-col justify-between gap-3 text-sm text-[#52616B] sm:flex-row sm:items-center">
+            <div className="mt-5 flex flex-col justify-between gap-3 text-sm text-primary sm:flex-row sm:items-center">
                 <p>
                     Showing {firstEntry} to {lastEntry} of {totalEntries} entries
                 </p>
                 <div className="flex items-center gap-2">
                     <button
                         type="button"
-                        className="inline-flex items-center gap-2 rounded-xl border border-[#52616B] px-3 py-2 text-[#1E2022] transition disabled:cursor-not-allowed disabled:text-[#52616B]"
+                        className="inline-flex items-center gap-2 rounded-xl border border-primary px-3 py-2 text-on-surface transition disabled:cursor-not-allowed disabled:text-primary"
                         disabled={safePage === 1}
                         onClick={() => setPage((current) => Math.max(1, current - 1))}
                     >
                         <ChevronLeft className="h-4 w-4" aria-hidden="true" />
                         Previous
                     </button>
-                    <span className="rounded-xl bg-[#F0F5F9] px-3 py-2 text-[#1E2022]">
+                    <span className="rounded-xl bg-background px-3 py-2 text-on-surface">
                         {safePage} / {totalPages}
                     </span>
                     <button
                         type="button"
-                        className="inline-flex items-center gap-2 rounded-xl border border-[#52616B] px-3 py-2 text-[#1E2022] transition disabled:cursor-not-allowed disabled:text-[#52616B]"
+                        className="inline-flex items-center gap-2 rounded-xl border border-primary px-3 py-2 text-on-surface transition disabled:cursor-not-allowed disabled:text-primary"
                         disabled={safePage === totalPages}
                         onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
                     >
@@ -194,3 +194,4 @@ const ManagementDataTable = ({
 };
 
 export default ManagementDataTable;
+
