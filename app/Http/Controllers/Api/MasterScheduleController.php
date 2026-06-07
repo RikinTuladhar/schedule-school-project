@@ -148,6 +148,10 @@ class MasterScheduleController extends BaseController
     {
         $provider = (string) config('ai.scheduler.provider', 'openrouter');
 
+        if ($provider === 'ollama') {
+            return true;
+        }
+
         return filled(config("ai.providers.{$provider}.key"));
     }
 

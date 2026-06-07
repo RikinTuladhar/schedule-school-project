@@ -30,15 +30,20 @@ class ProcessGradeScheduleJob implements ShouldQueue
      */
     public array $backoff = [30, 120, 300, 600];
 
+    /**
+     * @param array<int> $remainingGradeSectionIds
+     */
     public function __construct(
         public int $schoolId,
         public int $gradeSectionId,
-        public int $masterScheduleRunId
+        public int $masterScheduleRunId,
+        public array $remainingGradeSectionIds = []
     ) {}
 
     public function handle(ScheduleDataService $scheduleDataService): void
     {
-        if ($this->batch()?->cancelled()) {
+        $run = MasterScheduleRun::query()->find($this->masterScheduleRunId);
+        if (!$run || in_array($run->status, ['completed', 'failed', 'completed_with_errors'])) {
             return;
         }
 
@@ -62,19 +67,26 @@ class ProcessGradeScheduleJob implements ShouldQueue
             return;
         }
 
-        $rows = $this->extractScheduleRows($response->toArray());
+        $rows = $this->extractScheduleRows($response->toArray(), $context);
 
         try {
             $this->persistValidatedSchedule($gradeSection, $context, $rows);
+            $cacheKey = "schedule_run_{$this->masterScheduleRunId}_section_{$this->gradeSectionId}_last_error";
+            cache()->forget($cacheKey);
         } catch (\RuntimeException $exception) {
-            if ($this->isRetryableGlobalConflict($exception)) {
-                $this->releaseForGlobalConflict($exception);
+            $cacheKey = "schedule_run_{$this->masterScheduleRunId}_section_{$this->gradeSectionId}_last_error";
+            cache()->put($cacheKey, $exception->getMessage(), now()->addMinutes(10));
+
+            if ($this->isRetryableConflict($exception)) {
+                $this->releaseForConflict($exception);
 
                 return;
             }
 
             throw $exception;
         }
+
+        $this->dispatchNextJob();
     }
 
     /**
@@ -82,19 +94,60 @@ class ProcessGradeScheduleJob implements ShouldQueue
      */
     private function buildPrompt(array $context): string
     {
-        return <<<'PROMPT'
+        $bookings = data_get($context, 'schedule_context.global_teacher_bookings', []);
+        $formattedBookings = $this->formatGlobalBookingsForPrompt($bookings);
+
+        $cacheKey = "schedule_run_{$this->masterScheduleRunId}_section_{$this->gradeSectionId}_last_error";
+        $lastError = cache()->get($cacheKey);
+
+        $feedbackPrompt = '';
+        if ($lastError) {
+            $feedbackPrompt = "\nCRITICAL ERROR FEEDBACK FROM PREVIOUS ATTEMPT:\nYour previous generated schedule failed validation with this error: \"{$lastError}\".\nPlease ensure that your new schedule does not repeat this violation. Correct the placements to resolve this error.\n";
+        }
+
+        return <<<PROMPT
 Generate a schedule for the single grade section in this JSON context.
 
 The context has already removed Break and Assembly periods from schedule_template.available_time_slots. You may only use those available slots.
 
 Use teacher assignments as weekly quota targets. Each assignment includes the subject, sessions_per_week, and max_sessions_per_day.
 
-Hard global constraint: schedule_context.global_teacher_bookings lists teachers already placed in other grade sections for this run. Do not schedule a teacher into any matching day + time_slot combination from that list.
+{$feedbackPrompt}
+CRITICAL HARD CONSTRAINTS:
+- Do not schedule a teacher into any matching day + time_slot combination where they are already booked.
+- The following list shows teachers already booked in other sections for this run. DO NOT schedule them at these times:
+{$formattedBookings}
 
 Return the best valid schedule for this grade section only.
 
 Context JSON:
-PROMPT.PHP_EOL.json_encode($context, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT);
+PROMPT
+            . PHP_EOL
+            . json_encode($context, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT);
+    }
+
+    /**
+     * @param  array<int, array<string, string>>  $bookings
+     */
+    private function formatGlobalBookingsForPrompt(array $bookings): string
+    {
+        if (empty($bookings)) {
+            return "- None (all teachers are available at all times).";
+        }
+
+        $lines = [];
+        foreach ($bookings as $booking) {
+            $lines[] = sprintf(
+                "- Teacher [%s] is already booked on [%s] at [%s] (teaching %s in %s).",
+                $booking['teacher'],
+                $booking['day'],
+                $booking['time_slot'],
+                $booking['subject'],
+                $booking['grade_section']
+            );
+        }
+
+        return implode("\n", $lines);
     }
 
     /**
@@ -129,16 +182,50 @@ PROMPT.PHP_EOL.json_encode($context, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT);
      * @param  array<string, mixed>  $structured
      * @return array<int, array<string, string>>
      */
-    private function extractScheduleRows(array $structured): array
+    private function extractScheduleRows(array $structured, array $context): array
     {
+        $allowedDays = collect(data_get($context, 'schedule_template.days', []))->map(fn (mixed $day): string => (string) $day);
+        $allowedSlots = collect(data_get($context, 'schedule_template.available_time_slots', []))
+            ->pluck('time_slot')
+            ->map(fn (mixed $slot): string => (string) $slot);
+
+        $teacherNames = collect(data_get($context, 'teachers', []))
+            ->pluck('full_name')
+            ->map(fn (mixed $teacher): string => (string) $teacher);
+
+        $subjectNames = collect(data_get($context, 'teachers', []))
+            ->flatMap(fn (array $teacher): array => $teacher['assignments'] ?? [])
+            ->pluck('subject')
+            ->map(fn (mixed $subject): string => (string) $subject)
+            ->unique();
+
+        $slotMap = collect(data_get($context, 'schedule_template.available_time_slots', []))
+            ->flatMap(fn (array $slot, int $index): array => [
+                'period ' . ($index + 1) => $slot['time_slot'],
+                'period_' . ($index + 1) => $slot['time_slot'],
+                ($index + 1) . ' period' => $slot['time_slot'],
+                ($index + 1) . 'period' => $slot['time_slot'],
+                'first period' => $index === 0 ? $slot['time_slot'] : null,
+                'second period' => $index === 1 ? $slot['time_slot'] : null,
+                'third period' => $index === 2 ? $slot['time_slot'] : null,
+                'fourth period' => $index === 3 ? $slot['time_slot'] : null,
+                'fifth period' => $index === 4 ? $slot['time_slot'] : null,
+                'sixth period' => $index === 5 ? $slot['time_slot'] : null,
+                'seventh period' => $index === 6 ? $slot['time_slot'] : null,
+                'eighth period' => $index === 7 ? $slot['time_slot'] : null,
+                'ninth period' => $index === 8 ? $slot['time_slot'] : null,
+                'tenth period' => $index === 9 ? $slot['time_slot'] : null,
+            ])
+            ->filter();
+
         return collect($structured['schedule'] ?? [])
             ->filter(fn (mixed $row): bool => is_array($row))
             ->map(fn (array $row): array => [
-                'grade_section' => trim((string) ($row['grade_section'] ?? '')),
-                'day' => trim((string) ($row['day'] ?? '')),
-                'time_slot' => $this->normalizeTimeSlot((string) ($row['time_slot'] ?? '')),
-                'teacher' => trim((string) ($row['teacher'] ?? '')),
-                'subject' => trim((string) ($row['subject'] ?? '')),
+                'grade_section' => (string) data_get($context, 'grade_section.name'),
+                'day' => $this->normalizeDay((string) ($row['day'] ?? ''), $allowedDays),
+                'time_slot' => $this->findBestTimeSlot((string) ($row['time_slot'] ?? ''), $allowedSlots, $slotMap),
+                'teacher' => $this->normalizeTeacher((string) ($row['teacher'] ?? ''), $teacherNames),
+                'subject' => $this->normalizeSubject((string) ($row['subject'] ?? ''), $subjectNames),
             ])
             ->values()
             ->all();
@@ -153,8 +240,8 @@ PROMPT.PHP_EOL.json_encode($context, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT);
         Cache::lock("master-schedule-run:{$this->masterScheduleRunId}:validation", 60)
             ->block(15, function () use ($gradeSection, $context, $rows): void {
                 DB::transaction(function () use ($gradeSection, $context, $rows): void {
-                    $this->validateRows($context, $rows);
-                    $this->validateGlobalTeacherState($rows);
+                    $rows = $this->validateRows($context, $rows);
+                    $rows = $this->validateGlobalTeacherState($rows);
 
                     MasterScheduleEntry::query()
                         ->where('master_schedule_run_id', $this->masterScheduleRunId)
@@ -166,7 +253,7 @@ PROMPT.PHP_EOL.json_encode($context, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT);
                             'master_schedule_run_id' => $this->masterScheduleRunId,
                             'school_id' => $this->schoolId,
                             'grade_section_id' => $gradeSection->id,
-                            'grade_section' => $row['grade_section'],
+                            'grade_section' => $gradeSection->name,
                             'day' => $row['day'],
                             'time_slot' => $row['time_slot'],
                             'teacher' => $row['teacher'],
@@ -189,8 +276,9 @@ PROMPT.PHP_EOL.json_encode($context, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT);
     /**
      * @param  array<string, mixed>  $context
      * @param  array<int, array<string, string>>  $rows
+     * @return array<int, array<string, string>>
      */
-    private function validateRows(array $context, array $rows): void
+    private function validateRows(array $context, array $rows): array
     {
         $gradeSectionName = (string) data_get($context, 'grade_section.name');
         $allowedDays = collect(data_get($context, 'schedule_template.days', []))->map(fn (mixed $day): string => (string) $day);
@@ -219,48 +307,52 @@ PROMPT.PHP_EOL.json_encode($context, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT);
 
         $subjectPerDay = [];
         $teacherPerSlot = [];
+        $validRows = [];
 
         foreach ($rows as $row) {
+            $error = null;
+
             if ($row['grade_section'] !== $gradeSectionName) {
-                throw new \RuntimeException("Invalid grade_section [{$row['grade_section']}] returned by AI.");
+                $error = "Invalid grade_section [{$row['grade_section']}] returned by AI.";
+            } elseif (! $allowedDays->contains($row['day'])) {
+                $error = "Invalid day [{$row['day']}] returned by AI.";
+            } elseif (! $allowedSlots->contains($row['time_slot'])) {
+                $error = "Invalid or blocked time slot [{$row['time_slot']}] returned by AI.";
+            } elseif (! $teacherNames->contains($row['teacher'])) {
+                $error = "Unknown teacher [{$row['teacher']}] returned by AI.";
+            } elseif (! $subjectNames->contains($row['subject'])) {
+                $error = "Unknown subject [{$row['subject']}] returned by AI.";
+            } elseif (! $teacherSubjectPairs->has($this->teacherSubjectKey($row['teacher'], $row['subject']))) {
+                $error = "Teacher [{$row['teacher']}] is not assigned to subject [{$row['subject']}] for this grade section.";
+            } else {
+                $subjectKey = implode('|', [$row['grade_section'], $row['day'], mb_strtolower($row['subject'])]);
+                if (isset($subjectPerDay[$subjectKey])) {
+                    $error = "Subject [{$row['subject']}] appears more than once on [{$row['day']}] for [{$row['grade_section']}].";
+                } else {
+                    $subjectPerDay[$subjectKey] = true;
+                }
+
+                $teacherSlotKey = implode('|', [$row['day'], $row['time_slot'], mb_strtolower($row['teacher'])]);
+                if (isset($teacherPerSlot[$teacherSlotKey])) {
+                    $error = "Teacher [{$row['teacher']}] is double-booked inside the generated section payload.";
+                } else {
+                    $teacherPerSlot[$teacherSlotKey] = true;
+                }
             }
 
-            if (! $allowedDays->contains($row['day'])) {
-                throw new \RuntimeException("Invalid day [{$row['day']}] returned by AI.");
+            if ($error !== null) {
+                if ($this->attempts() < $this->tries) {
+                    throw new \RuntimeException($error);
+                } else {
+                    Log::warning("Filtering out invalid schedule row on final attempt: {$error}");
+                    continue;
+                }
             }
 
-            if (! $allowedSlots->contains($row['time_slot'])) {
-                throw new \RuntimeException("Invalid or blocked time slot [{$row['time_slot']}] returned by AI.");
-            }
-
-            if (! $teacherNames->contains($row['teacher'])) {
-                throw new \RuntimeException("Unknown teacher [{$row['teacher']}] returned by AI.");
-            }
-
-            if (! $subjectNames->contains($row['subject'])) {
-                throw new \RuntimeException("Unknown subject [{$row['subject']}] returned by AI.");
-            }
-
-            if (! $teacherSubjectPairs->has($this->teacherSubjectKey($row['teacher'], $row['subject']))) {
-                throw new \RuntimeException("Teacher [{$row['teacher']}] is not assigned to subject [{$row['subject']}] for this grade section.");
-            }
-
-            $subjectKey = implode('|', [$row['grade_section'], $row['day'], mb_strtolower($row['subject'])]);
-
-            if (isset($subjectPerDay[$subjectKey])) {
-                throw new \RuntimeException("Subject [{$row['subject']}] appears more than once on [{$row['day']}] for [{$row['grade_section']}].");
-            }
-
-            $subjectPerDay[$subjectKey] = true;
-
-            $teacherSlotKey = implode('|', [$row['day'], $row['time_slot'], mb_strtolower($row['teacher'])]);
-
-            if (isset($teacherPerSlot[$teacherSlotKey])) {
-                throw new \RuntimeException("Teacher [{$row['teacher']}] is double-booked inside the generated section payload.");
-            }
-
-            $teacherPerSlot[$teacherSlotKey] = true;
+            $validRows[] = $row;
         }
+
+        return $validRows;
     }
 
     private function teacherSubjectKey(string $teacher, string $subject): string
@@ -273,13 +365,199 @@ PROMPT.PHP_EOL.json_encode($context, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT);
         return preg_replace('/\s*-\s*/', '-', trim($slot)) ?? trim($slot);
     }
 
+    private function normalizeDay(string $day, \Illuminate\Support\Collection $allowedDays): string
+    {
+        $day = trim($day);
+
+        if ($allowedDays->contains($day)) {
+            return $day;
+        }
+
+        $map = [
+            'monday' => 'M', 'mon' => 'M', 'm' => 'M',
+            'tuesday' => 'T', 'tue' => 'T', 't' => 'T',
+            'wednesday' => 'W', 'wed' => 'W', 'w' => 'W',
+            'thursday' => 'Th', 'thu' => 'Th', 'th' => 'Th',
+            'friday' => 'F', 'fri' => 'F', 'f' => 'F',
+            'saturday' => 'Sa', 'sat' => 'Sa', 'sa' => 'Sa',
+            'sunday' => 'Su', 'sun' => 'Su', 'su' => 'Su',
+        ];
+
+        $lower = strtolower($day);
+        if (isset($map[$lower]) && $allowedDays->contains($map[$lower])) {
+            return $map[$lower];
+        }
+
+        foreach ($allowedDays as $allowedDay) {
+            if (strtolower($allowedDay) === $lower) {
+                return $allowedDay;
+            }
+        }
+
+        return $day;
+    }
+
+    private function normalizeTeacher(string $teacher, \Illuminate\Support\Collection $teacherNames): string
+    {
+        $teacher = trim($teacher);
+        $lowerTeacher = strtolower($teacher);
+
+        foreach ($teacherNames as $allowedTeacher) {
+            if (strtolower($allowedTeacher) === $lowerTeacher) {
+                return $allowedTeacher;
+            }
+        }
+
+        foreach ($teacherNames as $allowedTeacher) {
+            $allowedLower = strtolower($allowedTeacher);
+            if (str_contains($allowedLower, $lowerTeacher) || str_contains($lowerTeacher, $allowedLower)) {
+                return $allowedTeacher;
+            }
+        }
+
+        return $teacher;
+    }
+
+    private function normalizeSubject(string $subject, \Illuminate\Support\Collection $subjectNames): string
+    {
+        $subject = trim($subject);
+        $lowerSubject = strtolower($subject);
+
+        foreach ($subjectNames as $allowedSubject) {
+            if (strtolower($allowedSubject) === $lowerSubject) {
+                return $allowedSubject;
+            }
+        }
+
+        foreach ($subjectNames as $allowedSubject) {
+            $allowedLower = strtolower($allowedSubject);
+            if (str_contains($allowedLower, $lowerSubject) || str_contains($lowerSubject, $allowedLower)) {
+                return $allowedSubject;
+            }
+        }
+
+        return $subject;
+    }
+
+    private function parseToMinutes(string $time): ?int
+    {
+        $ts = strtotime(trim($time));
+        if ($ts === false) {
+            return null;
+        }
+        return (int) date('H', $ts) * 60 + (int) date('i', $ts);
+    }
+
+    private function findBestTimeSlot(string $slot, \Illuminate\Support\Collection $allowedSlots, \Illuminate\Support\Collection $slotMap): string
+    {
+        $slot = preg_replace('/\s*-\s*/', '-', trim($slot)) ?? trim($slot);
+        $lowerSlot = strtolower($slot);
+
+        if ($slotMap->has($lowerSlot)) {
+            return $slotMap->get($lowerSlot);
+        }
+
+        if ($allowedSlots->contains($slot)) {
+            return $slot;
+        }
+
+        $clean = function (string $s): string {
+            $s = strtolower($s);
+            $s = str_replace(['am', 'pm', ' '], '', $s);
+            $s = preg_replace_callback('/\b\d:\d\d\b/', fn($m) => '0' . $m[0], $s);
+            return $s;
+        };
+
+        $cleanedSlot = $clean($slot);
+
+        foreach ($allowedSlots as $allowedSlot) {
+            if ($clean($allowedSlot) === $cleanedSlot) {
+                return $allowedSlot;
+            }
+        }
+
+        // Try exact labels lookup
+        foreach ($slotMap as $label => $timeSlot) {
+            if (str_contains($label, $lowerSlot) || str_contains($lowerSlot, $label)) {
+                return $timeSlot;
+            }
+        }
+
+        // Fallback: Overlap calculation
+        $slotParts = explode('-', $slot);
+        $startStr = $slotParts[0] ?? '';
+        $endStr = $slotParts[1] ?? '';
+
+        $startMin = $this->parseToMinutes($startStr);
+        if ($startMin !== null) {
+            $endMin = $this->parseToMinutes($endStr) ?? ($startMin + 45); // default 45 mins if no end time
+
+            $bestSlot = null;
+            $maxOverlap = 0;
+
+            foreach ($allowedSlots as $allowedSlot) {
+                $allowedParts = explode('-', $allowedSlot);
+                $allowedStartStr = $allowedParts[0] ?? '';
+                $allowedEndStr = $allowedParts[1] ?? '';
+
+                $allowedStartMin = $this->parseToMinutes($allowedStartStr);
+                $allowedEndMin = $this->parseToMinutes($allowedEndStr);
+
+                if ($allowedStartMin !== null && $allowedEndMin !== null) {
+                    $overlap = min($endMin, $allowedEndMin) - max($startMin, $allowedStartMin);
+                    if ($overlap > $maxOverlap) {
+                        $maxOverlap = $overlap;
+                        $bestSlot = $allowedSlot;
+                    }
+                }
+            }
+
+            if ($bestSlot !== null && $maxOverlap > 0) {
+                return $bestSlot;
+            }
+        }
+
+        // Fallback: matching start time of the LLM slot
+        if (count($slotParts) > 0) {
+            $startOfSlot = $clean($slotParts[0]);
+            foreach ($allowedSlots as $allowedSlot) {
+                $allowedParts = explode('-', $allowedSlot);
+                if (count($allowedParts) > 0) {
+                    if ($clean($allowedParts[0]) === $startOfSlot) {
+                        return $allowedSlot;
+                    }
+                }
+            }
+        }
+
+        foreach ($allowedSlots as $allowedSlot) {
+            $parts = explode('-', $allowedSlot);
+            if (count($parts) > 0) {
+                if ($clean($parts[0]) === $cleanedSlot) {
+                    return $allowedSlot;
+                }
+            }
+        }
+
+        foreach ($allowedSlots as $allowedSlot) {
+            if (str_contains($clean($allowedSlot), $cleanedSlot) || str_contains($cleanedSlot, $clean($allowedSlot))) {
+                return $allowedSlot;
+            }
+        }
+
+        return $slot;
+    }
+
     /**
      * Mockable backtracking/global-state validation boundary.
      *
      * @param  array<int, array<string, string>>  $rows
+     * @return array<int, array<string, string>>
      */
-    private function validateGlobalTeacherState(array $rows): void
+    private function validateGlobalTeacherState(array $rows): array
     {
+        $validRows = [];
+
         foreach ($rows as $row) {
             $alreadyBooked = MasterScheduleEntry::query()
                 ->where('master_schedule_run_id', $this->masterScheduleRunId)
@@ -290,9 +568,19 @@ PROMPT.PHP_EOL.json_encode($context, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT);
                 ->exists();
 
             if ($alreadyBooked) {
-                throw new \RuntimeException("Global conflict: teacher [{$row['teacher']}] is already booked on [{$row['day']}] at [{$row['time_slot']}].");
+                $error = "Global conflict: teacher [{$row['teacher']}] is already booked on [{$row['day']}] at [{$row['time_slot']}].";
+                if ($this->attempts() < $this->tries) {
+                    throw new \RuntimeException($error);
+                } else {
+                    Log::warning("Filtering out conflicting schedule row on final attempt: {$error}");
+                    continue;
+                }
             }
+
+            $validRows[] = $row;
         }
+
+        return $validRows;
     }
 
     private function markSectionProcessed(): void
@@ -344,15 +632,14 @@ PROMPT.PHP_EOL.json_encode($context, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT);
         $this->release($this->backoff[min($this->attempts() - 1, count($this->backoff) - 1)]);
     }
 
-    private function isRetryableGlobalConflict(\RuntimeException $exception): bool
+    private function isRetryableConflict(\RuntimeException $exception): bool
     {
-        return str_starts_with($exception->getMessage(), 'Global conflict:')
-            && $this->attempts() < $this->tries;
+        return $this->attempts() < $this->tries;
     }
 
-    private function releaseForGlobalConflict(\RuntimeException $exception): void
+    private function releaseForConflict(\RuntimeException $exception): void
     {
-        Log::warning('AI generated a schedule with a global teacher conflict; retrying with updated bookings.', [
+        Log::warning('AI generated a schedule with a conflict; retrying with updated prompt feedback/bookings.', [
             'school_id' => $this->schoolId,
             'grade_section_id' => $this->gradeSectionId,
             'run_id' => $this->masterScheduleRunId,
@@ -360,7 +647,7 @@ PROMPT.PHP_EOL.json_encode($context, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT);
             'exception' => $exception->getMessage(),
         ]);
 
-        $this->release($this->backoff[min($this->attempts() - 1, count($this->backoff) - 1)]);
+        $this->release(1);
     }
 
     public function failed(Throwable $exception): void
@@ -373,5 +660,22 @@ PROMPT.PHP_EOL.json_encode($context, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT);
         ]);
 
         $this->markSectionFailed($exception->getMessage());
+
+        $this->dispatchNextJob();
+    }
+
+    private function dispatchNextJob(): void
+    {
+        if (!empty($this->remainingGradeSectionIds)) {
+            $nextIds = $this->remainingGradeSectionIds;
+            $nextId = array_shift($nextIds);
+
+            self::dispatch(
+                $this->schoolId,
+                $nextId,
+                $this->masterScheduleRunId,
+                $nextIds
+            );
+        }
     }
 }

@@ -30,12 +30,34 @@ class GenerateSchoolScheduleBatch implements ShouldQueue
     {
         $run = $this->resolveRun();
 
+        // Abort any previous active runs for this school before starting this one
+        MasterScheduleRun::query()
+            ->where('school_id', $this->schoolId)
+            ->where('id', '!=', $run->id)
+            ->whereIn('status', ['pending', 'processing'])
+            ->update([
+                'status' => 'failed',
+                'error_message' => 'Stale run aborted',
+                'finished_at' => now(),
+            ]);
+
+        // Sort grade sections naturally by grade name and section name
         $gradeSections = GradeSection::query()
             ->with(['gradeModel', 'sectionModel', 'scheduleTemplate'])
             ->where('school_id', $this->schoolId)
-            ->orderBy('grade_id')
-            ->orderBy('section_id')
-            ->get();
+            ->get()
+            ->sort(function (GradeSection $a, GradeSection $b) {
+                $gradeA = $a->gradeModel?->name ?? '';
+                $gradeB = $b->gradeModel?->name ?? '';
+                $cmp = strnatcasecmp($gradeA, $gradeB);
+                if ($cmp !== 0) {
+                    return $cmp;
+                }
+                $secA = $a->sectionModel?->name ?? '';
+                $secB = $b->sectionModel?->name ?? '';
+                return strnatcasecmp($secA, $secB);
+            })
+            ->values();
 
         $run->update([
             'status' => 'processing',
@@ -56,44 +78,15 @@ class GenerateSchoolScheduleBatch implements ShouldQueue
             return;
         }
 
-        /** @var array<int, ProcessGradeScheduleJob> $jobs */
-        $jobs = $gradeSections
-            ->map(fn (GradeSection $gradeSection): ProcessGradeScheduleJob => new ProcessGradeScheduleJob(
-                schoolId: $this->schoolId,
-                gradeSectionId: $gradeSection->id,
-                masterScheduleRunId: $run->id,
-            ))
-            ->all();
+        $ids = $gradeSections->pluck('id')->all();
+        $firstId = array_shift($ids);
 
-        /** @var PendingBatch $batch */
-        $batch = Bus::batch($jobs)
-            ->name("Master schedule generation run {$run->id}")
-            ->allowFailures()
-            ->then(function (Batch $batch) use ($run): void {
-                $run->refresh();
-
-                if ($run->processed_sections + $run->failed_sections >= $run->total_sections) {
-                    $run->update([
-                        'status' => $run->failed_sections > 0 ? 'completed_with_errors' : 'completed',
-                        'finished_at' => now(),
-                    ]);
-                }
-            })
-            ->catch(function (Batch $batch, Throwable $exception) use ($run): void {
-                Log::error('Master schedule batch failed.', [
-                    'run_id' => $run->id,
-                    'batch_id' => $batch->id,
-                    'exception' => $exception->getMessage(),
-                ]);
-
-                $run->update([
-                    'status' => 'failed',
-                    'error_message' => $exception->getMessage(),
-                    'finished_at' => now(),
-                ]);
-            });
-
-        $batch->dispatch();
+        ProcessGradeScheduleJob::dispatch(
+            $this->schoolId,
+            $firstId,
+            $run->id,
+            $ids
+        );
     }
 
     private function resolveRun(): MasterScheduleRun

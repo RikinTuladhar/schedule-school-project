@@ -38,7 +38,13 @@ Hard constraints, in priority order:
 2. Do not schedule more than one session of the same subject on the same day for the same grade section.
 3. A teacher may not be assigned to two grade sections in the same day and time slot.
 4. Respect each teacher's max_daily_classes and provided sessions_per_week quotas as closely as the candidate matrix allows.
-5. Use only grade sections, subjects, teachers, days, and time slots present in the user payload. Never invent names.
+5. Only assign a teacher to teach a subject that is explicitly listed under their assignments array in the teachers list. A teacher cannot teach subjects they are not assigned to.
+6. Use only teachers that are explicitly defined in the "teachers" array of the input JSON context. NEVER assign a teacher who is only mentioned in the "already booked" list if they are not in the "teachers" array.
+7. Use only grade sections, subjects, teachers, days, and time slots present in the user payload. Never invent names, day codes, or time slot ranges.
+
+CRITICAL FORMATTING RULES:
+- The day field MUST exactly match one of the day codes in schedule_template.days (e.g. "M", "T", "W", "Th", "F"). NEVER use full names like "Monday".
+- The time_slot field MUST exactly match one of the time_slot strings in schedule_template.available_time_slots (e.g. "09:00-09:45"). NEVER combine multiple slots (like "09:00-10:30") or write generic hours.
 
 Soft constraints:
 1. Prefer placements that honor each teacher's ai_context_notes.
