@@ -56,18 +56,41 @@ class ProcessGradeScheduleJob implements ShouldQueue
             $scheduleDataService->forGradeSection($this->schoolId, $gradeSection)
         );
 
-        try {
-            $response = MasterScheduleAgent::make()->prompt(
-                prompt: $this->buildPrompt($context),
-                timeout: 300,
-            );
-        } catch (RateLimitedException|ProviderOverloadedException $exception) {
-            $this->releaseForProviderPressure($exception);
+        Log::info("Allocation of teachers in timetable (Backtracking) started for Section: {$gradeSection->name}");
+        $btResult = $this->solveScheduleWithBacktracking($context);
 
-            return;
+        if ($btResult['success']) {
+            Log::info("Allocation of teachers in timetable (Backtracking) SUCCESSFUL: Placed {$btResult['placed_count']} out of {$btResult['total_count']} sessions in {$btResult['time_ms']} ms. [Section: {$gradeSection->name}]");
+            $rows = $btResult['schedule'];
+        } else {
+            Log::warning("Allocation of teachers in timetable (Backtracking) PARTIAL: Placed {$btResult['placed_count']} out of {$btResult['total_count']} sessions in {$btResult['time_ms']} ms. [Section: {$gradeSection->name}]. Falling back to AI.");
+            $context['backtracking_partial_schedule'] = [
+                'schedule' => $btResult['schedule'],
+                'placed_count' => $btResult['placed_count'],
+                'total_count' => $btResult['total_count'],
+                'unplaced_lessons' => $btResult['unplaced_lessons'],
+            ];
+
+            try {
+                $response = MasterScheduleAgent::make()->prompt(
+                    prompt: $this->buildPrompt($context),
+                    timeout: 300,
+                );
+            } catch (RateLimitedException|ProviderOverloadedException $exception) {
+                $this->releaseForProviderPressure($exception);
+
+                return;
+            }
+
+            $aiRows = $this->extractScheduleRows($response->toArray(), $context);
+            $rows = array_merge($btResult['schedule'], $aiRows);
         }
 
-        $rows = $this->extractScheduleRows($response->toArray(), $context);
+        // Log teacher allocations in Laravel log
+        $placementsSummary = collect($rows)
+            ->map(fn($r) => "{$r['teacher']} -> {$r['subject']} ({$r['day']} {$r['time_slot']})")
+            ->implode(', ');
+        Log::info("Teacher allocations for Section {$gradeSection->name}: {$placementsSummary}");
 
         try {
             $this->persistValidatedSchedule($gradeSection, $context, $rows);
@@ -105,6 +128,20 @@ class ProcessGradeScheduleJob implements ShouldQueue
             $feedbackPrompt = "\nCRITICAL ERROR FEEDBACK FROM PREVIOUS ATTEMPT:\nYour previous generated schedule failed validation with this error: \"{$lastError}\".\nPlease ensure that your new schedule does not repeat this violation. Correct the placements to resolve this error.\n";
         }
 
+        $backtrackingFeedback = '';
+        if (isset($context['backtracking_partial_schedule'])) {
+            $partial = $context['backtracking_partial_schedule'];
+            $backtrackingFeedback = "\nBACKTRACKING PARTIAL SCHEDULE:\n"
+                . "We have already placed {$partial['placed_count']} out of {$partial['total_count']} lessons without conflict:\n"
+                . json_encode($partial['schedule'], JSON_PRETTY_PRINT) . "\n\n"
+                . "UNPLACED LESSONS TO BE SCHEDULED:\n"
+                . "You must ONLY schedule these remaining unplaced lessons into the empty day/time slot combinations that are not already used in the backtracking partial schedule:\n"
+                . json_encode($partial['unplaced_lessons'], JSON_PRETTY_PRINT) . "\n\n"
+                . "INSTRUCTIONS:\n"
+                . "1. Do NOT duplicate or re-output the backtracking partial schedule in your response.\n"
+                . "2. Return ONLY the new schedule rows for the unplaced lessons.\n";
+        }
+
         return <<<PROMPT
 Generate a schedule for the single grade section in this JSON context.
 
@@ -113,6 +150,8 @@ The context has already removed Break and Assembly periods from schedule_templat
 Use teacher assignments as weekly quota targets. Each assignment includes the subject, sessions_per_week, and max_sessions_per_day.
 
 {$feedbackPrompt}
+{$backtrackingFeedback}
+
 CRITICAL HARD CONSTRAINTS:
 - Do not schedule a teacher into any matching day + time_slot combination where they are already booked.
 - The following list shows teachers already booked in other sections for this run. DO NOT schedule them at these times:
@@ -156,10 +195,13 @@ PROMPT
      */
     private function withGlobalTeacherBookings(array $context): array
     {
+        $assignedTeacherNames = collect($context['teachers'] ?? [])->pluck('full_name')->all();
+
         $context['schedule_context'] = [
             'global_teacher_bookings' => MasterScheduleEntry::query()
                 ->where('master_schedule_run_id', $this->masterScheduleRunId)
                 ->where('grade_section_id', '!=', $this->gradeSectionId)
+                ->whereIn('teacher', $assignedTeacherNames)
                 ->orderBy('day')
                 ->orderBy('time_slot')
                 ->orderBy('teacher')
@@ -307,6 +349,7 @@ PROMPT
 
         $subjectPerDay = [];
         $teacherPerSlot = [];
+        $slotPerDay = [];
         $validRows = [];
 
         foreach ($rows as $row) {
@@ -325,18 +368,29 @@ PROMPT
             } elseif (! $teacherSubjectPairs->has($this->teacherSubjectKey($row['teacher'], $row['subject']))) {
                 $error = "Teacher [{$row['teacher']}] is not assigned to subject [{$row['subject']}] for this grade section.";
             } else {
-                $subjectKey = implode('|', [$row['grade_section'], $row['day'], mb_strtolower($row['subject'])]);
-                if (isset($subjectPerDay[$subjectKey])) {
-                    $error = "Subject [{$row['subject']}] appears more than once on [{$row['day']}] for [{$row['grade_section']}].";
+                $slotKey = implode('|', [$row['day'], $row['time_slot']]);
+                if (isset($slotPerDay[$slotKey])) {
+                    $error = "Slot [{$row['day']} {$row['time_slot']}] is scheduled more than once in the generated section payload.";
                 } else {
-                    $subjectPerDay[$subjectKey] = true;
+                    $slotPerDay[$slotKey] = true;
                 }
 
-                $teacherSlotKey = implode('|', [$row['day'], $row['time_slot'], mb_strtolower($row['teacher'])]);
-                if (isset($teacherPerSlot[$teacherSlotKey])) {
-                    $error = "Teacher [{$row['teacher']}] is double-booked inside the generated section payload.";
-                } else {
-                    $teacherPerSlot[$teacherSlotKey] = true;
+                if ($error === null) {
+                    $subjectKey = implode('|', [$row['grade_section'], $row['day'], mb_strtolower($row['subject'])]);
+                    if (isset($subjectPerDay[$subjectKey])) {
+                        $error = "Subject [{$row['subject']}] appears more than once on [{$row['day']}] for [{$row['grade_section']}].";
+                    } else {
+                        $subjectPerDay[$subjectKey] = true;
+                    }
+                }
+
+                if ($error === null) {
+                    $teacherSlotKey = implode('|', [$row['day'], $row['time_slot'], mb_strtolower($row['teacher'])]);
+                    if (isset($teacherPerSlot[$teacherSlotKey])) {
+                        $error = "Teacher [{$row['teacher']}] is double-booked inside the generated section payload.";
+                    } else {
+                        $teacherPerSlot[$teacherSlotKey] = true;
+                    }
                 }
             }
 
@@ -677,5 +731,228 @@ PROMPT
                 $nextIds
             );
         }
+    }
+
+    /**
+     * @param array<string, mixed> $context
+     * @return array{success: bool, schedule: array<int, array<string, string>>, steps: int, time_ms: float, placed_count: int, total_count: int}
+     */
+    private function solveScheduleWithBacktracking(array $context): array
+    {
+        $startTime = microtime(true);
+
+        $allowedDays = $context['schedule_template']['days'];
+        $allowedSlots = collect($context['schedule_template']['available_time_slots'])->pluck('time_slot')->all();
+
+        $grid = [];
+        foreach ($allowedDays as $day) {
+            foreach ($allowedSlots as $slot) {
+                $grid[] = ['day' => $day, 'time_slot' => $slot];
+            }
+        }
+
+        $bookingsRaw = data_get($context, 'schedule_context.global_teacher_bookings', []);
+        $bookings = [];
+        foreach ($bookingsRaw as $booking) {
+            $day = $booking['day'];
+            $timeSlot = $booking['time_slot'];
+            $teacher = $booking['teacher'];
+            $bookings[$day][$timeSlot][$teacher] = true;
+        }
+
+        $assignments = [];
+        foreach ($context['teachers'] as $teacher) {
+            foreach ($teacher['assignments'] as $assignment) {
+                $assignments[] = [
+                    'teacher' => $teacher['full_name'],
+                    'subject' => $assignment['subject'],
+                    'sessions' => $assignment['sessions_per_week'],
+                ];
+            }
+        }
+
+        // Build round-robin lessons list to be balanced
+        $lessons = [];
+        $maxSessions = 0;
+        foreach ($assignments as $a) {
+            $maxSessions = max($maxSessions, $a['sessions']);
+        }
+        for ($round = 0; $round < $maxSessions; $round++) {
+            foreach ($assignments as $a) {
+                if ($round < $a['sessions']) {
+                    $lessons[] = [
+                        'teacher' => $a['teacher'],
+                        'subject' => $a['subject'],
+                    ];
+                }
+            }
+        }
+
+        // We can only place up to the size of the grid
+        $lessons = array_slice($lessons, 0, count($grid));
+
+        // Constraint heuristic: sort lessons so teachers with most global bookings are scheduled first
+        $teacherBookingsCount = [];
+        foreach ($context['teachers'] as $teacher) {
+            $name = $teacher['full_name'];
+            $count = 0;
+            foreach ($bookingsRaw as $b) {
+                if ($b['teacher'] === $name) {
+                    $count++;
+                }
+            }
+            $teacherBookingsCount[$name] = $count;
+        }
+
+        usort($lessons, function($a, $b) use ($teacherBookingsCount) {
+            return $teacherBookingsCount[$b['teacher']] <=> $teacherBookingsCount[$a['teacher']];
+        });
+
+        $steps = 0;
+        $bestSchedule = [];
+        $bestCount = 0;
+        $stepLimit = 25000;
+
+        $solver = function (
+            int $lessonIndex,
+            array $lessons,
+            array $grid,
+            array $bookings,
+            array &$assigned,
+            array &$subjectDay,
+            array &$teacherSlot,
+            int &$steps,
+            int $stepLimit,
+            array &$bestSchedule,
+            int &$bestCount,
+            int $placedCount
+        ) use (&$solver): void {
+            $steps++;
+            if ($steps > $stepLimit) {
+                return;
+            }
+
+            if ($placedCount + (count($lessons) - $lessonIndex) <= $bestCount) {
+                return;
+            }
+
+            if ($lessonIndex === count($lessons)) {
+                if ($placedCount > $bestCount) {
+                    $bestCount = $placedCount;
+                    $bestSchedule = $assigned;
+                }
+                return;
+            }
+
+            $lesson = $lessons[$lessonIndex];
+            $teacher = $lesson['teacher'];
+            $subject = $lesson['subject'];
+
+            for ($s = 0; $s < count($grid); $s++) {
+                if (isset($assigned[$s])) {
+                    continue;
+                }
+
+                $slot = $grid[$s];
+                $day = $slot['day'];
+                $timeSlot = $slot['time_slot'];
+
+                // Constraints:
+                if (isset($bookings[$day][$timeSlot][$teacher])) {
+                    continue;
+                }
+                if (isset($subjectDay[$day][$subject])) {
+                    continue;
+                }
+                if (isset($teacherSlot[$day][$timeSlot][$teacher])) {
+                    continue;
+                }
+
+                // Place
+                $assigned[$s] = $lesson;
+                $subjectDay[$day][$subject] = true;
+                $teacherSlot[$day][$timeSlot][$teacher] = true;
+
+                $solver(
+                    $lessonIndex + 1,
+                    $lessons,
+                    $grid,
+                    $bookings,
+                    $assigned,
+                    $subjectDay,
+                    $teacherSlot,
+                    $steps,
+                    $stepLimit,
+                    $bestSchedule,
+                    $bestCount,
+                    $placedCount + 1
+                );
+
+                // Undo
+                unset($assigned[$s]);
+                unset($subjectDay[$day][$subject]);
+                unset($teacherSlot[$day][$timeSlot][$teacher]);
+            }
+
+            // Option 2: Skip this lesson
+            $solver(
+                $lessonIndex + 1,
+                $lessons,
+                $grid,
+                $bookings,
+                $assigned,
+                $subjectDay,
+                $teacherSlot,
+                $steps,
+                $stepLimit,
+                $bestSchedule,
+                $bestCount,
+                $placedCount
+            );
+        };
+
+        $assigned = [];
+        $subjectDay = [];
+        $teacherSlot = [];
+
+        $solver(0, $lessons, $grid, $bookings, $assigned, $subjectDay, $teacherSlot, $steps, $stepLimit, $bestSchedule, $bestCount, 0);
+
+        $endTime = microtime(true);
+        $timeMs = round(($endTime - $startTime) * 1000, 2);
+
+        $finalRows = [];
+        foreach ($bestSchedule as $s => $lesson) {
+            $slot = $grid[$s];
+            $finalRows[] = [
+                'grade_section' => (string) data_get($context, 'grade_section.name'),
+                'day' => $slot['day'],
+                'time_slot' => $slot['time_slot'],
+                'teacher' => $lesson['teacher'],
+                'subject' => $lesson['subject'],
+            ];
+        }
+
+        $success = ($bestCount === count($lessons));
+
+        $unplacedLessons = $lessons;
+        foreach ($bestSchedule as $placedLesson) {
+            foreach ($unplacedLessons as $index => $unplaced) {
+                if ($unplaced['teacher'] === $placedLesson['teacher'] && $unplaced['subject'] === $placedLesson['subject']) {
+                    unset($unplacedLessons[$index]);
+                    break;
+                }
+            }
+        }
+        $unplacedLessons = array_values($unplacedLessons);
+
+        return [
+            'success' => $success,
+            'schedule' => $finalRows,
+            'steps' => $steps,
+            'time_ms' => $timeMs,
+            'placed_count' => $bestCount,
+            'total_count' => count($lessons),
+            'unplaced_lessons' => $unplacedLessons,
+        ];
     }
 }
