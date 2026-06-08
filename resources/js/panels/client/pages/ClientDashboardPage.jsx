@@ -9,7 +9,7 @@ import { Clock3, LoaderCircle, Sparkles, Users, X, Info, Lock, Unlock, Download 
 import { useEffect, useMemo, useState, useRef } from "react";
 import { useReactToPrint } from "react-to-print";
 
-const defaultDayOrder = ["M", "T", "W", "Th", "F"];
+const defaultDayOrder = ["M", "T", "W", "Th", "F", "Sa", "Su"];
 
 const dayLabels = {
     M: "Monday",
@@ -17,6 +17,8 @@ const dayLabels = {
     W: "Wednesday",
     Th: "Thursday",
     F: "Friday",
+    Sa: "Saturday",
+    Su: "Sunday",
 };
 
 const runningStatuses = new Set(["pending", "processing"]);
@@ -35,7 +37,14 @@ const formatPeriodType = (type) => {
 };
 
 const buildDays = (template) => {
-    const days = Array.isArray(template?.days) && template.days.length > 0 ? template.days : defaultDayOrder;
+    let days = Array.isArray(template?.days) && template.days.length > 0 ? template.days : ["M", "T", "W", "Th", "F"];
+
+    // Explicitly sort days to always start from Monday
+    days = [...days].sort((a, b) => {
+        const indexA = defaultDayOrder.indexOf(a);
+        const indexB = defaultDayOrder.indexOf(b);
+        return (indexA === -1 ? 99 : indexA) - (indexB === -1 ? 99 : indexB);
+    });
 
     return days.map((day) => ({
         id: day,
@@ -165,6 +174,7 @@ const ClientDashboardPage = () => {
     const [selectedGradeId, setSelectedGradeId] = useState("");
     const [activeSlot, setActiveSlot] = useState(null);
     const [markAsFixed, setMarkAsFixed] = useState(false);
+    const [suggestionSearchQuery, setSuggestionSearchQuery] = useState("");
     const contentRef = useRef(null);
 
     const templatesById = useMemo(() => {
@@ -312,7 +322,8 @@ const ClientDashboardPage = () => {
             })();
 
             // If the teacher is already teaching at this slot (double-booked), exclude them
-            if (stats.isBookedAtSlot) {
+            // UNLESS allow_multiple_sessions is true
+            if (stats.isBookedAtSlot && !teacher.allow_multiple_sessions) {
                 return;
             }
 
@@ -692,6 +703,7 @@ const ClientDashboardPage = () => {
                                                                         gradeId: selectedGradeId,
                                                                         gradeName: selectedGrade?.name ?? "Selected Grade",
                                                                     });
+                                                                    setSuggestionSearchQuery("");
                                                                 }}
                                                             >
                                                                 Empty Slot
@@ -728,7 +740,10 @@ const ClientDashboardPage = () => {
                                 type="button"
                                 className="flex h-9 w-9 items-center justify-center rounded-lg text-on-surface-variant transition hover:bg-surface-container-highest"
                                 aria-label="Close suggestions"
-                                onClick={() => setActiveSlot(null)}
+                                onClick={() => {
+                                    setActiveSlot(null);
+                                    setSuggestionSearchQuery("");
+                                }}
                             >
                                 <X className="h-5 w-5" aria-hidden="true" />
                             </button>
@@ -744,6 +759,13 @@ const ClientDashboardPage = () => {
                                 />
                                 <span>Lock/Fix this schedule entry (AI and Algorithm won't change this)</span>
                             </label>
+                            <input
+                                type="text"
+                                placeholder="Search by teacher or subject..."
+                                className="mt-3 w-full rounded-lg border border-outline-variant bg-surface-container-lowest px-3 py-2 text-sm text-on-surface outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                                value={suggestionSearchQuery}
+                                onChange={(e) => setSuggestionSearchQuery(e.target.value)}
+                            />
                         </div>
 
                         <div className="space-y-3 overflow-y-auto pr-1 flex-1">
@@ -757,8 +779,14 @@ const ClientDashboardPage = () => {
                                     No available teachers found for this slot.
                                 </div>
                             ) : (
-                                computedSuggestions.map((suggestion, idx) => {
-                                    const isPriority1 = suggestion.priority === 1;
+                                computedSuggestions
+                                    .filter((s) => {
+                                        if (!suggestionSearchQuery.trim()) return true;
+                                        const q = suggestionSearchQuery.toLowerCase();
+                                        return s.teacherName.toLowerCase().includes(q) || s.subjectName.toLowerCase().includes(q);
+                                    })
+                                    .map((suggestion, idx) => {
+                                        const isPriority1 = suggestion.priority === 1;
                                     const isPriority2 = suggestion.priority === 2;
 
                                     let badgeColor = "bg-slate-100 text-slate-700 border-slate-200/80";
@@ -813,6 +841,7 @@ const ClientDashboardPage = () => {
                                                     }, {
                                                         onSuccess: () => {
                                                             setActiveSlot(null);
+                                                            setSuggestionSearchQuery("");
                                                         },
                                                         onError: (err) => {
                                                             alert(getApiErrorMessage(err, "Failed to assign teacher."));

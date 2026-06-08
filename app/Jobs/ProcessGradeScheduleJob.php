@@ -177,6 +177,8 @@ Use teacher assignments as weekly quota targets. Each assignment includes the su
 {$fixedPrompt}
 
 CRITICAL HARD CONSTRAINTS:
+- STRICTLY respect teacher availability and time constraints. If a teacher is part-time or has a specific availability window (e.g. 9:40 AM to 1:00 PM), DO NOT place them in time slots outside this window.
+- Prioritize scheduling part-time teachers first before full-time teachers to ensure their constrained schedules can be met.
 - Do not schedule a teacher into any matching day + time_slot combination where they are already booked.
 - The following list shows teachers already booked in other sections for this run. DO NOT schedule them at these times:
 {$formattedBookings}
@@ -307,7 +309,7 @@ PROMPT
             ->block(15, function () use ($gradeSection, $context, $rows): void {
                 DB::transaction(function () use ($gradeSection, $context, $rows): void {
                     $rows = $this->validateRows($context, $rows);
-                    $rows = $this->validateGlobalTeacherState($rows);
+                    $rows = $this->validateGlobalTeacherState($context, $rows);
 
                     MasterScheduleEntry::query()
                         ->where('master_schedule_run_id', $this->masterScheduleRunId)
@@ -373,6 +375,9 @@ PROMPT
                 ->all())
             ->flip();
 
+        $teacherMultipleSessions = collect(data_get($context, 'teachers', []))
+            ->mapWithKeys(fn (array $teacher): array => [(string) $teacher['full_name'] => (bool) ($teacher['allow_multiple_sessions'] ?? false)]);
+
         $subjectPerDay = [];
         $teacherPerSlot = [];
         $slotPerDay = [];
@@ -420,7 +425,8 @@ PROMPT
 
                 if ($error === null) {
                     $teacherSlotKey = implode('|', [$row['day'], $row['time_slot'], mb_strtolower($row['teacher'])]);
-                    if (isset($teacherPerSlot[$teacherSlotKey])) {
+                    $allowsMultiple = $teacherMultipleSessions->get($row['teacher']) === true;
+                    if (!$allowsMultiple && isset($teacherPerSlot[$teacherSlotKey])) {
                         $error = "Teacher [{$row['teacher']}] is double-booked inside the generated section payload.";
                     } else {
                         $teacherPerSlot[$teacherSlotKey] = true;
@@ -642,7 +648,7 @@ PROMPT
      * @param  array<int, array<string, string>>  $rows
      * @return array<int, array<string, string>>
      */
-    private function validateGlobalTeacherState(array $rows): array
+    private function validateGlobalTeacherState(array $context, array $rows): array
     {
         $validRows = [];
 
@@ -664,7 +670,15 @@ PROMPT
                     }
                 }
 
-                if (!$isFixed) {
+                $allowsMultiple = false;
+                foreach (data_get($context, 'teachers', []) as $t) {
+                    if ($t['full_name'] === $row['teacher']) {
+                        $allowsMultiple = (bool) ($t['allow_multiple_sessions'] ?? false);
+                        break;
+                    }
+                }
+
+                if (!$isFixed && !$allowsMultiple) {
                     $error = "Global conflict: teacher [{$row['teacher']}] is already booked on [{$row['day']}] at [{$row['time_slot']}].";
                     if ($this->attempts() < $this->tries) {
                         throw new \RuntimeException($error);
@@ -847,8 +861,12 @@ PROMPT
         $lessonsLimit = count($grid) - count($fixedEntries);
         $lessons = array_slice($lessons, 0, max(0, $lessonsLimit));
 
-        // Constraint heuristic: sort lessons so teachers with most global bookings are scheduled first
+        // Prepare availability, part-time status, and bookings count to enforce logic
         $teacherBookingsCount = [];
+        $teacherTypes = [];
+        $teacherAvailabilities = [];
+        $teacherMultipleSessions = [];
+
         foreach ($context['teachers'] as $teacher) {
             $name = $teacher['full_name'];
             $count = 0;
@@ -858,9 +876,38 @@ PROMPT
                 }
             }
             $teacherBookingsCount[$name] = $count;
+            $teacherTypes[$name] = $teacher['employment_type'] ?? 'full-time';
+
+            $avail = [];
+            foreach (($teacher['availability'] ?? []) as $dayLabel => $settings) {
+                $abbrev = $this->normalizeDay($dayLabel, collect($allowedDays));
+                $startMin = !empty($settings['start_time']) ? $this->parseToMinutes($settings['start_time']) : null;
+                $endMin = !empty($settings['end_time']) ? $this->parseToMinutes($settings['end_time']) : null;
+                $avail[$abbrev] = [
+                    'active' => $settings['active'] ?? true,
+                    'start' => $startMin,
+                    'end' => $endMin,
+                ];
+            }
+            $teacherAvailabilities[$name] = $avail;
+            $teacherMultipleSessions[$name] = $teacher['allow_multiple_sessions'] ?? false;
         }
 
-        usort($lessons, function($a, $b) use ($teacherBookingsCount) {
+        foreach ($grid as &$slotRef) {
+            $parts = explode('-', $slotRef['time_slot']);
+            $slotRef['start_min'] = $this->parseToMinutes($parts[0] ?? '') ?? 0;
+            $slotRef['end_min'] = $this->parseToMinutes($parts[1] ?? '') ?? ($slotRef['start_min'] + 45);
+        }
+        unset($slotRef);
+
+        usort($lessons, function($a, $b) use ($teacherBookingsCount, $teacherTypes) {
+            $typeA = $teacherTypes[$a['teacher']] === 'part-time' ? 1 : 0;
+            $typeB = $teacherTypes[$b['teacher']] === 'part-time' ? 1 : 0;
+            
+            if ($typeA !== $typeB) {
+                return $typeB <=> $typeA; // part-time first
+            }
+            
             return $teacherBookingsCount[$b['teacher']] <=> $teacherBookingsCount[$a['teacher']];
         });
 
@@ -882,7 +929,7 @@ PROMPT
             array &$bestSchedule,
             int &$bestCount,
             int $placedCount
-        ) use (&$solver): void {
+        ) use (&$solver, $teacherAvailabilities, $teacherMultipleSessions): void {
             $steps++;
             if ($steps > $stepLimit) {
                 return;
@@ -913,15 +960,29 @@ PROMPT
                 $day = $slot['day'];
                 $timeSlot = $slot['time_slot'];
 
+                $allowsMultiple = $teacherMultipleSessions[$teacher] ?? false;
+
                 // Constraints:
-                if (isset($bookings[$day][$timeSlot][$teacher])) {
+                if (!$allowsMultiple && isset($bookings[$day][$timeSlot][$teacher])) {
                     continue;
                 }
                 if (isset($subjectDay[$day][$subject])) {
                     continue;
                 }
-                if (isset($teacherSlot[$day][$timeSlot][$teacher])) {
+                if (!$allowsMultiple && isset($teacherSlot[$day][$timeSlot][$teacher])) {
                     continue;
+                }
+
+                if (isset($teacherAvailabilities[$teacher][$day])) {
+                    $avail = $teacherAvailabilities[$teacher][$day];
+                    if ($avail['active'] === false) {
+                        continue;
+                    }
+                    if ($avail['start'] !== null && $avail['end'] !== null) {
+                        if ($slot['start_min'] < $avail['start'] || $slot['end_min'] > $avail['end']) {
+                            continue;
+                        }
+                    }
                 }
 
                 // Place

@@ -18,6 +18,7 @@ class Teacher extends Model
         'ai_context_notes',
         'availability',
         'assignments',
+        'allow_multiple_sessions',
     ];
 
     protected $appends = [
@@ -30,6 +31,7 @@ class Teacher extends Model
             'availability' => 'array',
             'assignments' => 'array',
             'max_daily_classes' => 'integer',
+            'allow_multiple_sessions' => 'boolean',
         ];
     }
 

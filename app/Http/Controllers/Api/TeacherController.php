@@ -100,11 +100,25 @@ class TeacherController extends BaseController
 
     private function validatedPayload(Request $request, int $schoolId): array
     {
+        if ($request->has('assignments') && is_array($request->assignments)) {
+            $validSubjects = \App\Models\Subject::where('school_id', $schoolId)->where('status', 'active')->pluck('id')->toArray();
+            $validGrades = \App\Models\GradeSection::where('school_id', $schoolId)->pluck('id')->toArray();
+
+            $filteredAssignments = array_filter($request->assignments, function ($assignment) use ($validSubjects, $validGrades) {
+                return isset($assignment['subject_id'], $assignment['grade_section_id'])
+                    && in_array((int)$assignment['subject_id'], $validSubjects, true)
+                    && in_array((int)$assignment['grade_section_id'], $validGrades, true);
+            });
+
+            $request->merge(['assignments' => array_values($filteredAssignments)]);
+        }
+
         return $request->validate([
             'full_name' => ['required', 'string', 'max:255'],
             'employment_type' => ['required', Rule::in(['full-time', 'part-time'])],
             'max_daily_classes' => ['required', 'integer', 'min:1', 'max:12'],
             'ai_context_notes' => ['nullable', 'string'],
+            'allow_multiple_sessions' => ['nullable', 'boolean'],
             'availability' => ['nullable', 'array'],
             'availability.*.active' => ['nullable', 'boolean'],
             'availability.*.start_time' => ['nullable', 'date_format:H:i'],

@@ -41,6 +41,7 @@ const createInitialProfile = () => ({
     employment_type: "full-time",
     max_daily_classes: 6,
     ai_context_notes: "",
+    allow_multiple_sessions: false,
 });
 
 const normalizeAvailability = (availability) => ({
@@ -88,6 +89,7 @@ const buildTeacherPayload = (profile, availability, assignments) => ({
     employment_type: profile.employment_type,
     max_daily_classes: Number(profile.max_daily_classes),
     ai_context_notes: profile.ai_context_notes?.trim() || null,
+    allow_multiple_sessions: Boolean(profile.allow_multiple_sessions),
     availability,
     assignments: assignments.flatMap((assignment) =>
         assignment.grade_section_ids.map((gradeSectionId) => ({
@@ -361,6 +363,7 @@ const ClientTeacherPage = () => {
             employment_type: teacher.employment_type ?? "full-time",
             max_daily_classes: teacher.max_daily_classes ?? 6,
             ai_context_notes: teacher.ai_context_notes ?? "",
+            allow_multiple_sessions: teacher.allow_multiple_sessions ?? false,
         });
         setAvailability(normalizeAvailability(teacher.availability));
         setAssignments(normalizeAssignments(teacher.assignments, defaultGradeSectionId, defaultSubjectId));
@@ -554,6 +557,19 @@ const ClientTeacherPage = () => {
                                 <span className="mt-2 block text-xs leading-5 text-primary">
                                     Hard constraint: Maximum total blocks this teacher can work in a single day.
                                 </span>
+                            </label>
+
+                            <label className="block lg:col-span-3 mt-2 flex items-center gap-3">
+                                <input
+                                    type="checkbox"
+                                    className="h-5 w-5 rounded border-primary bg-background text-primary focus:ring-primary/20"
+                                    checked={profile.allow_multiple_sessions}
+                                    onChange={(event) => updateProfile("allow_multiple_sessions", event.target.checked)}
+                                />
+                                <div>
+                                    <span className="block text-sm font-semibold">Allow Multiple Sessions (Double-Booking)</span>
+                                    <span className="block text-xs text-primary">Check this if the teacher can teach multiple grades at the exact same time (e.g. Games, Dance). This bypasses conflict constraints.</span>
+                                </div>
                             </label>
                         </div>
                     </section>
