@@ -48,6 +48,7 @@ class MasterScheduleController extends BaseController
             'time_slot' => 'required|string|max:50',
             'teacher' => 'required|string|max:255',
             'subject' => 'required|string|max:255',
+            'is_fixed' => 'nullable|boolean',
         ]);
 
         $gradeSection = \App\Models\GradeSection::query()
@@ -84,6 +85,10 @@ class MasterScheduleController extends BaseController
                 'grade_section' => $gradeSection->name ?? 'Grade Section',
                 'teacher' => $validated['teacher'],
                 'subject' => $validated['subject'],
+                'metadata' => [
+                    'is_fixed' => (bool) ($validated['is_fixed'] ?? false),
+                    'source' => 'manual-assignment',
+                ],
             ]
         );
 
@@ -103,6 +108,27 @@ class MasterScheduleController extends BaseController
         $entry->delete();
 
         return $this->sendResponse('Allocation removed successfully');
+    }
+
+    public function toggleFixed(Request $request, MasterScheduleEntry $entry)
+    {
+        $schoolId = $this->schoolId($request);
+
+        if (! $schoolId || (int) $entry->school_id !== (int) $schoolId) {
+            return $this->sendErrorResponse('Unauthorized.', [], 403);
+        }
+
+        $metadata = $entry->metadata ?? [];
+        $isFixed = ! ($metadata['is_fixed'] ?? false);
+        $metadata['is_fixed'] = $isFixed;
+
+        $entry->update([
+            'metadata' => $metadata,
+        ]);
+
+        return $this->sendResponse('Allocation lock status updated', [
+            'entry' => $entry,
+        ]);
     }
 
     public function latest(Request $request)

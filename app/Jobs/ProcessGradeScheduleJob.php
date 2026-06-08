@@ -56,6 +56,22 @@ class ProcessGradeScheduleJob implements ShouldQueue
             $scheduleDataService->forGradeSection($this->schoolId, $gradeSection)
         );
 
+        $fixedEntries = MasterScheduleEntry::query()
+            ->where('master_schedule_run_id', $this->masterScheduleRunId)
+            ->where('grade_section_id', $this->gradeSectionId)
+            ->get()
+            ->filter(function (MasterScheduleEntry $entry) {
+                return is_array($entry->metadata) && ($entry->metadata['is_fixed'] ?? false) === true;
+            });
+
+        $context['fixed_entries'] = $fixedEntries->map(fn(MasterScheduleEntry $entry) => [
+            'day' => $entry->day,
+            'time_slot' => $entry->time_slot,
+            'teacher' => $entry->teacher,
+            'subject' => $entry->subject,
+            'metadata' => $entry->metadata,
+        ])->values()->all();
+
         Log::info("Allocation of teachers in timetable (Backtracking) started for Section: {$gradeSection->name}");
         $btResult = $this->solveScheduleWithBacktracking($context);
 
@@ -142,6 +158,13 @@ class ProcessGradeScheduleJob implements ShouldQueue
                 . "2. Return ONLY the new schedule rows for the unplaced lessons.\n";
         }
 
+        $fixedPrompt = '';
+        if (!empty($context['fixed_entries'])) {
+            $fixedPrompt = "\nFIXED SCHEDULE ENTRIES (LOCKED):\n"
+                . "The following periods are pre-scheduled/fixed and CANNOT be changed or replaced. They are already placed:\n"
+                . json_encode($context['fixed_entries'], JSON_PRETTY_PRINT) . "\n\n";
+        }
+
         return <<<PROMPT
 Generate a schedule for the single grade section in this JSON context.
 
@@ -151,6 +174,7 @@ Use teacher assignments as weekly quota targets. Each assignment includes the su
 
 {$feedbackPrompt}
 {$backtrackingFeedback}
+{$fixedPrompt}
 
 CRITICAL HARD CONSTRAINTS:
 - Do not schedule a teacher into any matching day + time_slot combination where they are already booked.
@@ -300,7 +324,9 @@ PROMPT
                             'time_slot' => $row['time_slot'],
                             'teacher' => $row['teacher'],
                             'subject' => $row['subject'],
-                            'metadata' => json_encode(['source' => 'laravel-ai-master-schedule-agent']),
+                            'metadata' => isset($row['metadata'])
+                                ? (is_array($row['metadata']) ? json_encode($row['metadata']) : $row['metadata'])
+                                : json_encode(['source' => 'laravel-ai-master-schedule-agent']),
                             'created_at' => now(),
                             'updated_at' => now(),
                         ])
@@ -355,17 +381,25 @@ PROMPT
         foreach ($rows as $row) {
             $error = null;
 
+            $isFixed = false;
+            if (isset($row['metadata'])) {
+                $metaDecoded = is_string($row['metadata']) ? json_decode($row['metadata'], true) : $row['metadata'];
+                if (isset($metaDecoded['is_fixed']) && $metaDecoded['is_fixed'] === true) {
+                    $isFixed = true;
+                }
+            }
+
             if ($row['grade_section'] !== $gradeSectionName) {
                 $error = "Invalid grade_section [{$row['grade_section']}] returned by AI.";
             } elseif (! $allowedDays->contains($row['day'])) {
                 $error = "Invalid day [{$row['day']}] returned by AI.";
             } elseif (! $allowedSlots->contains($row['time_slot'])) {
                 $error = "Invalid or blocked time slot [{$row['time_slot']}] returned by AI.";
-            } elseif (! $teacherNames->contains($row['teacher'])) {
+            } elseif (!$isFixed && ! $teacherNames->contains($row['teacher'])) {
                 $error = "Unknown teacher [{$row['teacher']}] returned by AI.";
-            } elseif (! $subjectNames->contains($row['subject'])) {
+            } elseif (!$isFixed && ! $subjectNames->contains($row['subject'])) {
                 $error = "Unknown subject [{$row['subject']}] returned by AI.";
-            } elseif (! $teacherSubjectPairs->has($this->teacherSubjectKey($row['teacher'], $row['subject']))) {
+            } elseif (!$isFixed && ! $teacherSubjectPairs->has($this->teacherSubjectKey($row['teacher'], $row['subject']))) {
                 $error = "Teacher [{$row['teacher']}] is not assigned to subject [{$row['subject']}] for this grade section.";
             } else {
                 $slotKey = implode('|', [$row['day'], $row['time_slot']]);
@@ -622,12 +656,22 @@ PROMPT
                 ->exists();
 
             if ($alreadyBooked) {
-                $error = "Global conflict: teacher [{$row['teacher']}] is already booked on [{$row['day']}] at [{$row['time_slot']}].";
-                if ($this->attempts() < $this->tries) {
-                    throw new \RuntimeException($error);
-                } else {
-                    Log::warning("Filtering out conflicting schedule row on final attempt: {$error}");
-                    continue;
+                $isFixed = false;
+                if (isset($row['metadata'])) {
+                    $metaDecoded = is_string($row['metadata']) ? json_decode($row['metadata'], true) : $row['metadata'];
+                    if (isset($metaDecoded['is_fixed']) && $metaDecoded['is_fixed'] === true) {
+                        $isFixed = true;
+                    }
+                }
+
+                if (!$isFixed) {
+                    $error = "Global conflict: teacher [{$row['teacher']}] is already booked on [{$row['day']}] at [{$row['time_slot']}].";
+                    if ($this->attempts() < $this->tries) {
+                        throw new \RuntimeException($error);
+                    } else {
+                        Log::warning("Filtering out conflicting schedule row on final attempt: {$error}");
+                        continue;
+                    }
                 }
             }
 
@@ -760,14 +804,25 @@ PROMPT
             $bookings[$day][$timeSlot][$teacher] = true;
         }
 
+        $fixedEntries = $context['fixed_entries'] ?? [];
+
         $assignments = [];
         foreach ($context['teachers'] as $teacher) {
             foreach ($teacher['assignments'] as $assignment) {
-                $assignments[] = [
-                    'teacher' => $teacher['full_name'],
-                    'subject' => $assignment['subject'],
-                    'sessions' => $assignment['sessions_per_week'],
-                ];
+                $fixedCount = 0;
+                foreach ($fixedEntries as $fixed) {
+                    if ($fixed['teacher'] === $teacher['full_name'] && $fixed['subject'] === $assignment['subject']) {
+                        $fixedCount++;
+                    }
+                }
+                $remainingSessions = max(0, $assignment['sessions_per_week'] - $fixedCount);
+                if ($remainingSessions > 0) {
+                    $assignments[] = [
+                        'teacher' => $teacher['full_name'],
+                        'subject' => $assignment['subject'],
+                        'sessions' => $remainingSessions,
+                    ];
+                }
             }
         }
 
@@ -788,8 +843,9 @@ PROMPT
             }
         }
 
-        // We can only place up to the size of the grid
-        $lessons = array_slice($lessons, 0, count($grid));
+        // We can only place up to the size of the grid minus fixed entries
+        $lessonsLimit = count($grid) - count($fixedEntries);
+        $lessons = array_slice($lessons, 0, max(0, $lessonsLimit));
 
         // Constraint heuristic: sort lessons so teachers with most global bookings are scheduled first
         $teacherBookingsCount = [];
@@ -915,7 +971,27 @@ PROMPT
         $subjectDay = [];
         $teacherSlot = [];
 
-        $solver(0, $lessons, $grid, $bookings, $assigned, $subjectDay, $teacherSlot, $steps, $stepLimit, $bestSchedule, $bestCount, 0);
+        foreach ($fixedEntries as $fixed) {
+            $foundIndex = null;
+            foreach ($grid as $index => $slot) {
+                if ($slot['day'] === $fixed['day'] && $slot['time_slot'] === $fixed['time_slot']) {
+                    $foundIndex = $index;
+                    break;
+                }
+            }
+
+            if ($foundIndex !== null) {
+                $assigned[$foundIndex] = [
+                    'teacher' => $fixed['teacher'],
+                    'subject' => $fixed['subject'],
+                    'metadata' => $fixed['metadata'],
+                ];
+                $subjectDay[$fixed['day']][$fixed['subject']] = true;
+                $teacherSlot[$fixed['day']][$fixed['time_slot']][$fixed['teacher']] = true;
+            }
+        }
+
+        $solver(0, $lessons, $grid, $bookings, $assigned, $subjectDay, $teacherSlot, $steps, $stepLimit, $bestSchedule, $bestCount, count($fixedEntries));
 
         $endTime = microtime(true);
         $timeMs = round(($endTime - $startTime) * 1000, 2);
@@ -929,13 +1005,17 @@ PROMPT
                 'time_slot' => $slot['time_slot'],
                 'teacher' => $lesson['teacher'],
                 'subject' => $lesson['subject'],
+                'metadata' => $lesson['metadata'] ?? null,
             ];
         }
 
-        $success = ($bestCount === count($lessons));
+        $success = ($bestCount === (count($lessons) + count($fixedEntries)));
 
         $unplacedLessons = $lessons;
         foreach ($bestSchedule as $placedLesson) {
+            if (isset($placedLesson['metadata']['is_fixed']) && $placedLesson['metadata']['is_fixed'] === true) {
+                continue;
+            }
             foreach ($unplacedLessons as $index => $unplaced) {
                 if ($unplaced['teacher'] === $placedLesson['teacher'] && $unplaced['subject'] === $placedLesson['subject']) {
                     unset($unplacedLessons[$index]);
@@ -951,7 +1031,7 @@ PROMPT
             'steps' => $steps,
             'time_ms' => $timeMs,
             'placed_count' => $bestCount,
-            'total_count' => count($lessons),
+            'total_count' => count($lessons) + count($fixedEntries),
             'unplaced_lessons' => $unplacedLessons,
         ];
     }

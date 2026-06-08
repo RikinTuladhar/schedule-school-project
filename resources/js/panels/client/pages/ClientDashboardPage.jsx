@@ -1,11 +1,11 @@
 import { getApiErrorMessage } from "@/apis/auth/client.api";
 import { useGetGradeData } from "@/apis/grade/get.api";
 import { useGetLatestMasterScheduleRun } from "@/apis/master-schedule/get.api";
-import { useGenerateMasterSchedule, useAssignTeacherToSlot, useDeleteTeacherFromSlot } from "@/apis/master-schedule/post.api";
+import { useGenerateMasterSchedule, useAssignTeacherToSlot, useDeleteTeacherFromSlot, useToggleFixedEntry } from "@/apis/master-schedule/post.api";
 import { useGetScheduleTemplates } from "@/apis/schedule-template/get.api";
 import { useGetTeachers } from "@/apis/teacher/get.api";
 import { useGetSubjects } from "@/apis/subject/get.api";
-import { Clock3, LoaderCircle, Sparkles, Users, X, Info } from "lucide-react";
+import { Clock3, LoaderCircle, Sparkles, Users, X, Info, Lock, Unlock } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 const defaultDayOrder = ["M", "T", "W", "Th", "F"];
@@ -75,6 +75,7 @@ const buildScheduleMap = (run, selectedGradeId) => {
             id: entry.id,
             subject: entry.subject,
             teacher: entry.teacher,
+            metadata: entry.metadata,
         };
     });
 
@@ -156,11 +157,13 @@ const ClientDashboardPage = () => {
     const generateMutation = useGenerateMasterSchedule();
     const assignMutation = useAssignTeacherToSlot();
     const deleteMutation = useDeleteTeacherFromSlot();
+    const toggleFixedMutation = useToggleFixedEntry();
     const teachersQuery = useGetTeachers();
     const subjectsQuery = useGetSubjects({ status: "active" });
 
     const [selectedGradeId, setSelectedGradeId] = useState("");
     const [activeSlot, setActiveSlot] = useState(null);
+    const [markAsFixed, setMarkAsFixed] = useState(false);
 
     const templatesById = useMemo(() => {
         return (templatesQuery.data ?? []).reduce((lookup, template) => {
@@ -575,47 +578,91 @@ const ClientDashboardPage = () => {
                                                         key={`${slot.id}-${day.id}`}
                                                         className="min-h-28 border-l border-outline-variant/30 px-3 py-3"
                                                     >
-                                                        {assignment ? (
-                                                            <article className="relative group h-full rounded-xl bg-white p-4 pr-8 shadow-sm ring-1 ring-outline-variant/30">
-                                                                <button
-                                                                    type="button"
-                                                                    className="absolute right-2 top-2 z-20 flex h-5 w-5 items-center justify-center rounded-full bg-error/10 text-error hover:bg-error hover:text-white transition disabled:opacity-50 pointer-events-auto cursor-pointer"
-                                                                    title="Remove allocation"
-                                                                    onClick={(e) => {
-                                                                        e.stopPropagation();
-                                                                        console.log("Remove allocation clicked, assignment:", assignment);
-                                                                        if (!assignment.id) {
-                                                                            alert("Error: Assignment ID is missing. Please reload the page.");
-                                                                            return;
-                                                                        }
-                                                                        if (window.confirm(`Remove assignment of ${assignment.teacher} for ${assignment.subject}?`)) {
-                                                                            deleteMutation.mutate(assignment.id, {
-                                                                                onSuccess: () => {
-                                                                                    latestRunQuery.refetch();
-                                                                                },
-                                                                                onError: (err) => {
-                                                                                    console.error("Deletion failed:", err);
-                                                                                    alert(getApiErrorMessage(err, "Failed to remove allocation."));
+                                                                                        {assignment ? (
+                                                            (() => {
+                                                                const isFixed = assignment.metadata?.is_fixed === true;
+                                                                return (
+                                                                    <article className={`relative group h-full rounded-xl p-4 pr-8 shadow-sm ring-1 transition ${
+                                                                        isFixed
+                                                                            ? "bg-amber-50/40 border border-amber-300/60 ring-amber-300/40"
+                                                                            : "bg-white ring-outline-variant/30"
+                                                                    }`}>
+                                                                        <button
+                                                                            type="button"
+                                                                            className="absolute right-2 top-2 z-20 flex h-5 w-5 items-center justify-center rounded-full bg-error/10 text-error hover:bg-error hover:text-white transition disabled:opacity-50 pointer-events-auto cursor-pointer"
+                                                                            title="Remove allocation"
+                                                                            onClick={(e) => {
+                                                                                e.stopPropagation();
+                                                                                console.log("Remove allocation clicked, assignment:", assignment);
+                                                                                if (!assignment.id) {
+                                                                                    alert("Error: Assignment ID is missing. Please reload the page.");
+                                                                                    return;
                                                                                 }
-                                                                            });
-                                                                        }
-                                                                    }}
-                                                                    disabled={deleteMutation.isPending}
-                                                                >
-                                                                    <X className="h-3 w-3" />
-                                                                </button>
-                                                                <h4 className="font-semibold text-on-surface">
-                                                                    {assignment.subject}
-                                                                </h4>
-                                                                <p className="mt-2 text-sm text-on-surface-variant">
-                                                                    {assignment.teacher}
-                                                                </p>
-                                                            </article>
+                                                                                if (window.confirm(`Remove assignment of ${assignment.teacher} for ${assignment.subject}?`)) {
+                                                                                    deleteMutation.mutate(assignment.id, {
+                                                                                        onSuccess: () => {
+                                                                                            latestRunQuery.refetch();
+                                                                                        },
+                                                                                        onError: (err) => {
+                                                                                            console.error("Deletion failed:", err);
+                                                                                            alert(getApiErrorMessage(err, "Failed to remove allocation."));
+                                                                                        }
+                                                                                    });
+                                                                                }
+                                                                            }}
+                                                                            disabled={deleteMutation.isPending}
+                                                                        >
+                                                                            <X className="h-3 w-3" />
+                                                                        </button>
+
+                                                                        <button
+                                                                            type="button"
+                                                                            className={`absolute right-2 top-8 z-20 flex h-5 w-5 items-center justify-center rounded-full transition pointer-events-auto cursor-pointer ${
+                                                                                isFixed
+                                                                                    ? "bg-amber-100 text-amber-700 hover:bg-amber-200"
+                                                                                    : "bg-surface-container text-on-surface-variant hover:bg-primary/10 hover:text-primary"
+                                                                            }`}
+                                                                            title={isFixed ? "Unlock entry" : "Lock entry"}
+                                                                            onClick={(e) => {
+                                                                                e.stopPropagation();
+                                                                                toggleFixedMutation.mutate(assignment.id, {
+                                                                                    onSuccess: () => {
+                                                                                        latestRunQuery.refetch();
+                                                                                    },
+                                                                                    onError: (err) => {
+                                                                                        alert(getApiErrorMessage(err, "Failed to toggle lock."));
+                                                                                    }
+                                                                                });
+                                                                            }}
+                                                                            disabled={toggleFixedMutation.isPending}
+                                                                        >
+                                                                            {isFixed ? (
+                                                                                <Lock className="h-3 w-3" />
+                                                                            ) : (
+                                                                                <Unlock className="h-3 w-3" />
+                                                                            )}
+                                                                        </button>
+
+                                                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                                                            <h4 className="font-semibold text-on-surface">
+                                                                                {assignment.subject}
+                                                                            </h4>
+                                                                            {isFixed && (
+                                                                                <Lock className="h-3.5 w-3.5 text-amber-600 shrink-0" title="Fixed/Locked schedule entry" />
+                                                                            )}
+                                                                        </div>
+                                                                        <p className="mt-2 text-sm text-on-surface-variant">
+                                                                            {assignment.teacher}
+                                                                        </p>
+                                                                    </article>
+                                                                );
+                                                            })()
                                                         ) : (
                                                             <button
                                                                 type="button"
                                                                 className="flex h-full min-h-20 w-full items-center justify-center rounded-xl border border-dashed border-primary bg-surface-container-lowest px-3 py-4 text-center font-label text-xs uppercase text-primary transition hover:bg-surface-container-highest"
-                                                                onClick={() =>
+                                                                onClick={() => {
+                                                                    setMarkAsFixed(false);
                                                                     setActiveSlot({
                                                                         dayId: day.id,
                                                                         dayLabel: day.label,
@@ -623,8 +670,8 @@ const ClientDashboardPage = () => {
                                                                         slotLabel: slot.label,
                                                                         gradeId: selectedGradeId,
                                                                         gradeName: selectedGrade?.name ?? "Selected Grade",
-                                                                    })
-                                                                }
+                                                                    });
+                                                                }}
                                                             >
                                                                 Empty Slot
                                                             </button>
@@ -664,6 +711,18 @@ const ClientDashboardPage = () => {
                             >
                                 <X className="h-5 w-5" aria-hidden="true" />
                             </button>
+                        </div>
+
+                        <div className="mb-4 shrink-0 px-1 border-b border-outline-variant/10 pb-3">
+                            <label className="flex items-center gap-2 text-sm text-on-surface-variant cursor-pointer select-none">
+                                <input
+                                    type="checkbox"
+                                    checked={markAsFixed}
+                                    onChange={(e) => setMarkAsFixed(e.target.checked)}
+                                    className="rounded border-outline-variant text-primary focus:ring-primary h-4 w-4"
+                                />
+                                <span>Lock/Fix this schedule entry (AI and Algorithm won't change this)</span>
+                            </label>
                         </div>
 
                         <div className="space-y-3 overflow-y-auto pr-1 flex-1">
@@ -729,6 +788,7 @@ const ClientDashboardPage = () => {
                                                         time_slot: activeSlot.slotId,
                                                         teacher: suggestion.teacherName,
                                                         subject: suggestion.subjectName,
+                                                        metadata: { is_fixed: markAsFixed }
                                                     }, {
                                                         onSuccess: () => {
                                                             setActiveSlot(null);

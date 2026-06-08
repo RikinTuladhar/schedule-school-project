@@ -69,6 +69,36 @@ class GenerateSchoolScheduleBatch implements ShouldQueue
             'finished_at' => null,
         ]);
 
+        // Copy fixed entries from the latest completed run to the new run
+        $previousRun = MasterScheduleRun::query()
+            ->where('school_id', $this->schoolId)
+            ->where('id', '!=', $run->id)
+            ->whereIn('status', ['completed', 'completed_with_errors'])
+            ->latest()
+            ->first();
+
+        if ($previousRun) {
+            $fixedEntries = $previousRun->entries()
+                ->get()
+                ->filter(function (\App\Models\MasterScheduleEntry $entry) {
+                    return is_array($entry->metadata) && ($entry->metadata['is_fixed'] ?? false) === true;
+                });
+
+            foreach ($fixedEntries as $entry) {
+                \App\Models\MasterScheduleEntry::create([
+                    'master_schedule_run_id' => $run->id,
+                    'school_id' => $this->schoolId,
+                    'grade_section_id' => $entry->grade_section_id,
+                    'grade_section' => $entry->grade_section,
+                    'day' => $entry->day,
+                    'time_slot' => $entry->time_slot,
+                    'teacher' => $entry->teacher,
+                    'subject' => $entry->subject,
+                    'metadata' => $entry->metadata,
+                ]);
+            }
+        }
+
         if ($gradeSections->isEmpty()) {
             $run->update([
                 'status' => 'completed',

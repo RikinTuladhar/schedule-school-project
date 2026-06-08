@@ -56,3 +56,19 @@ export function useDeleteTeacherFromSlot() {
     });
 }
 
+export async function toggleFixedEntry(entryId) {
+    const res = await axiosInstance.patch(`/master-schedules/entries/${entryId}/toggle-fixed`);
+    return res?.data?.data?.entry ?? null;
+}
+
+export function useToggleFixedEntry() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: toggleFixedEntry,
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: MASTER_SCHEDULE_QUERY_KEY });
+        },
+    });
+}
+

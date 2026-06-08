@@ -26,6 +26,7 @@ const ClientAcademicRecordPage = () => {
 
     const [searchQuery, setSearchQuery] = useState("");
     const [selectedGradeSection, setSelectedGradeSection] = useState(null);
+    const [drawerSearchQuery, setDrawerSearchQuery] = useState("");
 
     // Lookups
     const subjectMap = useMemo(() => {
@@ -61,6 +62,9 @@ const ClientAcademicRecordPage = () => {
                 });
             });
 
+            // Sort assignments alphabetically by subject name (ascending order)
+            assignments.sort((a, b) => a.subjectName.localeCompare(b.subjectName));
+
             const uniqueTeachers = new Set(assignments.map((a) => a.teacher.id));
             const uniqueSubjects = new Set(assignments.map((a) => a.subjectId));
 
@@ -95,15 +99,37 @@ const ClientAcademicRecordPage = () => {
         // Determine which active subjects are NOT assigned to this grade section
         const assignedSubjectIds = new Set(sectionInfo.assignments.map((a) => a.subjectId));
         const allSubjects = subjectsQuery.data ?? [];
-        const unassignedSubjects = allSubjects.filter(
-            (s) => !assignedSubjectIds.has(String(s.id))
-        );
+        const unassignedSubjects = allSubjects
+            .filter((s) => !assignedSubjectIds.has(String(s.id)))
+            .sort((a, b) => a.name.localeCompare(b.name));
 
         return {
             ...sectionInfo,
             unassignedSubjects,
         };
     }, [selectedGradeSection, computedGradeSections, subjectsQuery.data]);
+
+    // Filtered lists for the Side Sheet Drawer detail view
+    const filteredAssignments = useMemo(() => {
+        if (!selectedDetails) return [];
+        const query = drawerSearchQuery.trim().toLowerCase();
+        if (!query) return selectedDetails.assignments;
+        return selectedDetails.assignments.filter(
+            (item) => 
+                item.subjectName.toLowerCase().includes(query) ||
+                item.teacher.full_name.toLowerCase().includes(query) ||
+                (item.teacher.email && item.teacher.email.toLowerCase().includes(query))
+        );
+    }, [selectedDetails, drawerSearchQuery]);
+
+    const filteredUnassignedSubjects = useMemo(() => {
+        if (!selectedDetails) return [];
+        const query = drawerSearchQuery.trim().toLowerCase();
+        if (!query) return selectedDetails.unassignedSubjects;
+        return selectedDetails.unassignedSubjects.filter(
+            (subject) => subject.name.toLowerCase().includes(query)
+        );
+    }, [selectedDetails, drawerSearchQuery]);
 
     const isLoading = 
         gradeDataQuery.isLoading || 
@@ -175,7 +201,10 @@ const ClientAcademicRecordPage = () => {
                         {filteredGradeSections.map((gs) => (
                             <div
                                 key={gs.id}
-                                onClick={() => setSelectedGradeSection(gs)}
+                                onClick={() => {
+                                    setSelectedGradeSection(gs);
+                                    setDrawerSearchQuery("");
+                                }}
                                 className="group relative cursor-pointer overflow-hidden rounded-2xl border border-outline-variant/30 bg-surface-container-lowest p-6 shadow-sm transition hover:border-primary/50 hover:shadow-md hover:-translate-y-1"
                             >
                                 <div className="absolute right-0 top-0 h-24 w-24 translate-x-8 -translate-y-8 rounded-full bg-primary/5 transition group-hover:scale-125" />
@@ -225,21 +254,27 @@ const ClientAcademicRecordPage = () => {
                     {/* Glassmorphic backdrop */}
                     <div 
                         className="absolute inset-0 bg-inverse-surface/35 backdrop-blur-sm"
-                        onClick={() => setSelectedGradeSection(null)}
+                        onClick={() => {
+                            setSelectedGradeSection(null);
+                            setDrawerSearchQuery("");
+                        }}
                     />
                     
                     {/* Drawer Content */}
                     <aside className="relative flex h-full w-full max-w-xl flex-col bg-surface p-6 shadow-2xl animate-in slide-in-from-right duration-300">
                         {/* Close button */}
                         <button
-                            onClick={() => setSelectedGradeSection(null)}
+                            onClick={() => {
+                                setSelectedGradeSection(null);
+                                setDrawerSearchQuery("");
+                            }}
                             className="absolute right-5 top-5 flex h-9 w-9 items-center justify-center rounded-full text-on-surface-variant transition hover:bg-surface-variant"
                         >
                             <X className="h-5 w-5" />
                         </button>
 
                         {/* Title Section */}
-                        <div className="mb-6">
+                        <div className="mb-4">
                             <div className="flex items-center gap-2">
                                 <GraduationCap className="h-6 w-6 text-primary" />
                                 <h2 className="text-2xl font-bold text-on-surface">{selectedDetails.name} Curriculum</h2>
@@ -249,21 +284,45 @@ const ClientAcademicRecordPage = () => {
                             </p>
                         </div>
 
+                        {/* Drawer Search Bar */}
+                        <div className="relative mb-6">
+                            <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-primary" />
+                            <input
+                                type="text"
+                                placeholder="Search assigned staff, subjects..."
+                                value={drawerSearchQuery}
+                                onChange={(e) => setDrawerSearchQuery(e.target.value)}
+                                className="w-full rounded-full border border-primary/20 bg-surface-container-low py-2.5 pl-10 pr-8 text-xs text-on-surface outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+                            />
+                            {drawerSearchQuery && (
+                                <button
+                                    onClick={() => setDrawerSearchQuery("")}
+                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-on-surface"
+                                >
+                                    <X className="h-4 w-4" />
+                                </button>
+                            )}
+                        </div>
+
                         {/* Scrolling Content Area */}
                         <div className="flex-1 overflow-y-auto space-y-6 pr-2">
                             
                             {/* Assigned Subjects & Teachers */}
                             <div>
                                 <h3 className="text-sm font-bold uppercase tracking-wider text-on-surface-variant mb-3">
-                                    Assigned Staff ({selectedDetails.assignments.length})
+                                    Assigned Staff ({filteredAssignments.length})
                                 </h3>
                                 {selectedDetails.assignments.length === 0 ? (
                                     <div className="rounded-xl border border-dashed border-outline-variant/50 p-6 text-center text-sm text-on-surface-variant">
                                         No subjects or teachers have been assigned to this grade section yet.
                                     </div>
+                                ) : filteredAssignments.length === 0 ? (
+                                    <div className="rounded-xl border border-dashed border-outline-variant/50 p-6 text-center text-sm text-on-surface-variant">
+                                        No matching assigned staff found.
+                                    </div>
                                 ) : (
                                     <div className="space-y-4">
-                                        {selectedDetails.assignments.map((item, idx) => (
+                                        {filteredAssignments.map((item, idx) => (
                                             <article 
                                                 key={idx}
                                                 className="rounded-xl border border-outline-variant/30 bg-surface-container-low p-4 shadow-sm"
@@ -312,15 +371,19 @@ const ClientAcademicRecordPage = () => {
                             {/* Unassigned Subjects */}
                             <div>
                                 <h3 className="text-sm font-bold uppercase tracking-wider text-on-surface-variant mb-3">
-                                    Unassigned Subjects ({selectedDetails.unassignedSubjects.length})
+                                    Unassigned Subjects ({filteredUnassignedSubjects.length})
                                 </h3>
                                 {selectedDetails.unassignedSubjects.length === 0 ? (
                                     <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/20 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-300">
                                         All curriculum subjects are fully assigned to teachers for this grade.
                                     </div>
+                                ) : filteredUnassignedSubjects.length === 0 ? (
+                                    <div className="rounded-xl border border-dashed border-outline-variant/50 p-4 text-center text-sm text-on-surface-variant">
+                                        No matching unassigned subjects found.
+                                    </div>
                                 ) : (
                                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                                        {selectedDetails.unassignedSubjects.map((subject) => (
+                                        {filteredUnassignedSubjects.map((subject) => (
                                             <div 
                                                 key={subject.id}
                                                 className="flex items-center gap-2 rounded-lg border border-outline-variant/20 bg-surface-container-lowest px-3 py-2.5 text-sm text-on-surface"

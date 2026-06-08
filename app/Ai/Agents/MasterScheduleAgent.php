@@ -41,6 +41,7 @@ Hard constraints, in priority order:
 5. Only assign a teacher to teach a subject that is explicitly listed under their assignments array in the teachers list. A teacher cannot teach subjects they are not assigned to.
 6. Use only teachers that are explicitly defined in the "teachers" array of the input JSON context. NEVER assign a teacher who is only mentioned in the "already booked" list if they are not in the "teachers" array.
 7. Use only grade sections, subjects, teachers, days, and time slots present in the user payload. Never invent names, day codes, or time slot ranges.
+8. Respect any fixed/locked entries specified in the context. Never overwrite or duplicate them.
 
 CRITICAL FORMATTING RULES:
 - The day field MUST exactly match one of the day codes in schedule_template.days (e.g. "M", "T", "W", "Th", "F"). NEVER use full names like "Monday".
