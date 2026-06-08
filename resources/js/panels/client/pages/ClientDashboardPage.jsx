@@ -5,8 +5,9 @@ import { useGenerateMasterSchedule, useAssignTeacherToSlot, useDeleteTeacherFrom
 import { useGetScheduleTemplates } from "@/apis/schedule-template/get.api";
 import { useGetTeachers } from "@/apis/teacher/get.api";
 import { useGetSubjects } from "@/apis/subject/get.api";
-import { Clock3, LoaderCircle, Sparkles, Users, X, Info, Lock, Unlock } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Clock3, LoaderCircle, Sparkles, Users, X, Info, Lock, Unlock, Download } from "lucide-react";
+import { useEffect, useMemo, useState, useRef } from "react";
+import { useReactToPrint } from "react-to-print";
 
 const defaultDayOrder = ["M", "T", "W", "Th", "F"];
 
@@ -164,6 +165,7 @@ const ClientDashboardPage = () => {
     const [selectedGradeId, setSelectedGradeId] = useState("");
     const [activeSlot, setActiveSlot] = useState(null);
     const [markAsFixed, setMarkAsFixed] = useState(false);
+    const contentRef = useRef(null);
 
     const templatesById = useMemo(() => {
         return (templatesQuery.data ?? []).reduce((lookup, template) => {
@@ -206,6 +208,15 @@ const ClientDashboardPage = () => {
     const handleGenerate = () => {
         generateMutation.mutate();
     };
+
+    const handleDownloadPdf = useReactToPrint({
+        contentRef,
+        documentTitle: `${selectedGrade?.name || 'Schedule'}_Timetable`,
+        pageStyle: `
+            @page { size: landscape; margin: 0.5in; }
+            @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+        `,
+    });
 
     const subjectMap = useMemo(() => {
         return (subjectsQuery.data ?? []).reduce((acc, sub) => {
@@ -490,8 +501,8 @@ const ClientDashboardPage = () => {
                     </div>
                 </aside>
 
-                <main className="overflow-hidden rounded-xl border border-outline-variant/30 bg-surface-container-lowest shadow-sm">
-                    <div className="flex flex-col justify-between gap-3 border-b border-outline-variant/30 px-5 py-4 md:flex-row md:items-center">
+                <main ref={contentRef} id="schedule-pdf-content" className="overflow-hidden rounded-xl border border-outline-variant/30 bg-surface-container-lowest shadow-sm print:shadow-none print:border-none">
+                    <div className="flex flex-col justify-between gap-3 border-b border-outline-variant/30 px-5 py-4 md:flex-row md:items-center print:border-none">
                         <div>
                             <h3 className="text-2xl font-semibold text-on-surface">
                                 {selectedGrade?.name ?? "Selected Grade"} Timetable
@@ -500,8 +511,18 @@ const ClientDashboardPage = () => {
                                 Schedule rows come from the assigned template periods.
                             </p>
                         </div>
-                        <div className="rounded-lg bg-secondary px-3 py-2 font-label text-xs text-on-secondary">
-                            Empty cells are Copilot-enabled drop zones
+                        <div className="flex items-center gap-3 print:hidden" data-html2canvas-ignore>
+                            <button
+                                type="button"
+                                onClick={handleDownloadPdf}
+                                className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 font-label text-xs text-on-primary shadow-sm transition hover:bg-primary/90"
+                            >
+                                <Download className="h-4 w-4" />
+                                Download PDF
+                            </button>
+                            <div className="rounded-lg bg-secondary px-3 py-2 font-label text-xs text-on-secondary">
+                                Empty cells are Copilot-enabled drop zones
+                            </div>
                         </div>
                     </div>
 
