@@ -17,3 +17,42 @@ export function useGenerateMasterSchedule() {
         },
     });
 }
+
+export async function assignTeacherToSlot({ grade_section_id, day, time_slot, teacher, subject }) {
+    const res = await axiosInstance.post("/master-schedules/assign", {
+        grade_section_id,
+        day,
+        time_slot,
+        teacher,
+        subject,
+    });
+    return res?.data?.data?.entry ?? null;
+}
+
+export function useAssignTeacherToSlot() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: assignTeacherToSlot,
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: MASTER_SCHEDULE_QUERY_KEY });
+        },
+    });
+}
+
+export async function deleteTeacherFromSlot(entryId) {
+    const res = await axiosInstance.delete(`/master-schedules/entries/${entryId}`);
+    return res?.data ?? null;
+}
+
+export function useDeleteTeacherFromSlot() {
+    const queryClient = useQueryClient();
+
+    return useMutation({
+        mutationFn: deleteTeacherFromSlot,
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: MASTER_SCHEDULE_QUERY_KEY });
+        },
+    });
+}
+

@@ -5,9 +5,11 @@ import ClientSignUpPage from "@/panels/auth/client/ClientSignUpPage";
 import ClientLayout from "@/panels/client/layout/ClientLayout";
 import ClientAssignmentGridPage from "@/panels/client/pages/assignment/ClientAssignmentGridPage";
 import ClientDashboardPage from "@/panels/client/pages/ClientDashboardPage";
+import ClientAcademicRecordPage from "@/panels/client/pages/ClientAcademicRecordPage";
 import ClientGradePage from "@/panels/client/pages/grade/ClientGradePage";
 import ClientSubjectPage from "@/panels/client/pages/subject/ClientSubjectPage";
 import ClientTeacherPage from "@/panels/client/pages/teacher/ClientTeacherPage";
+import ClientTeacherRoutinePage from "@/panels/client/pages/teacher/ClientTeacherRoutinePage";
 import GuestLayout from "@/panels/guest/layout/GuestLayout";
 import HomePage from "@/panels/guest/pages/HomePage";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -63,6 +65,10 @@ const router = createBrowserRouter([
                 element: <ClientAssignmentGridPage />,
             },
             {
+                path: "academic-records",
+                element: <ClientAcademicRecordPage />,
+            },
+            {
                 path: "grades",
                 element: <ClientGradePage />,
             },
@@ -73,6 +79,10 @@ const router = createBrowserRouter([
             {
                 path: "teachers",
                 element: <ClientTeacherPage />,
+            },
+            {
+                path: "teacher-routines",
+                element: <ClientTeacherRoutinePage />,
             },
         ],
     },

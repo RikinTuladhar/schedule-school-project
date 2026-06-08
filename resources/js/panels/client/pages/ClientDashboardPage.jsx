@@ -1,9 +1,11 @@
 import { getApiErrorMessage } from "@/apis/auth/client.api";
 import { useGetGradeData } from "@/apis/grade/get.api";
 import { useGetLatestMasterScheduleRun } from "@/apis/master-schedule/get.api";
-import { useGenerateMasterSchedule } from "@/apis/master-schedule/post.api";
+import { useGenerateMasterSchedule, useAssignTeacherToSlot, useDeleteTeacherFromSlot } from "@/apis/master-schedule/post.api";
 import { useGetScheduleTemplates } from "@/apis/schedule-template/get.api";
-import { Clock3, LoaderCircle, Sparkles, Users, X } from "lucide-react";
+import { useGetTeachers } from "@/apis/teacher/get.api";
+import { useGetSubjects } from "@/apis/subject/get.api";
+import { Clock3, LoaderCircle, Sparkles, Users, X, Info } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 const defaultDayOrder = ["M", "T", "W", "Th", "F"];
@@ -15,12 +17,6 @@ const dayLabels = {
     Th: "Thursday",
     F: "Friday",
 };
-
-const suggestions = [
-    { name: "Available Teacher A", match: 96, reason: "Subject load and availability match" },
-    { name: "Available Teacher B", match: 91, reason: "No back-to-back conflict detected" },
-    { name: "Available Teacher C", match: 87, reason: "Meets grade-level preference" },
-];
 
 const runningStatuses = new Set(["pending", "processing"]);
 
@@ -76,6 +72,7 @@ const buildScheduleMap = (run, selectedGradeId) => {
         }
 
         schedule[entry.time_slot][entry.day] = {
+            id: entry.id,
             subject: entry.subject,
             teacher: entry.teacher,
         };
@@ -157,6 +154,10 @@ const ClientDashboardPage = () => {
         refetchInterval: 4000,
     });
     const generateMutation = useGenerateMasterSchedule();
+    const assignMutation = useAssignTeacherToSlot();
+    const deleteMutation = useDeleteTeacherFromSlot();
+    const teachersQuery = useGetTeachers();
+    const subjectsQuery = useGetSubjects({ status: "active" });
 
     const [selectedGradeId, setSelectedGradeId] = useState("");
     const [activeSlot, setActiveSlot] = useState(null);
@@ -202,6 +203,185 @@ const ClientDashboardPage = () => {
     const handleGenerate = () => {
         generateMutation.mutate();
     };
+
+    const subjectMap = useMemo(() => {
+        return (subjectsQuery.data ?? []).reduce((acc, sub) => {
+            acc[String(sub.id)] = sub.name;
+            return acc;
+        }, {});
+    }, [subjectsQuery.data]);
+
+    const computedSuggestions = useMemo(() => {
+        if (!activeSlot || !teachersQuery.data) {
+            return [];
+        }
+
+        const { dayId, dayLabel, slotId, gradeId } = activeSlot;
+        const teachers = teachersQuery.data;
+
+        // 1. Calculate stats for each teacher from the latest run's schedules
+        const teacherStats = {};
+        (latestRun?.schedules ?? []).forEach((sectionSchedule) => {
+            (sectionSchedule.entries ?? []).forEach((entry) => {
+                const tName = entry.teacher;
+                if (!tName) return;
+
+                if (!teacherStats[tName]) {
+                    teacherStats[tName] = {
+                        isBookedAtSlot: false,
+                        dailyClassCount: 0,
+                        scheduledEntries: [],
+                    };
+                }
+
+                if (entry.day === dayId) {
+                    teacherStats[tName].dailyClassCount += 1;
+                    if (entry.time_slot === slotId) {
+                        teacherStats[tName].isBookedAtSlot = true;
+                    }
+                }
+                teacherStats[tName].scheduledEntries.push(entry);
+            });
+        });
+
+        // 2. Identify which subjects are already scheduled in this grade section on this day
+        // to respect constraint: max one subject session per day per class
+        const scheduledSubjectsInGradeOnDay = new Set();
+        const currentGradeSchedule = latestRun?.schedules?.find(
+            (item) => String(item.grade_section_id) === String(gradeId),
+        );
+        (currentGradeSchedule?.entries ?? []).forEach((entry) => {
+            if (entry.day === dayId && entry.subject) {
+                scheduledSubjectsInGradeOnDay.add(entry.subject.toLowerCase());
+            }
+        });
+
+        const list = [];
+
+        teachers.forEach((teacher) => {
+            const stats = teacherStats[teacher.full_name] ?? {
+                isBookedAtSlot: false,
+                dailyClassCount: 0,
+                scheduledEntries: [],
+            };
+
+            // Check availability according to profile settings
+            const isAvailableByProfile = (() => {
+                if (!teacher.availability || !teacher.availability[dayLabel]) {
+                    return true;
+                }
+                const dayAvail = teacher.availability[dayLabel];
+                if (dayAvail.active === false) {
+                    return false;
+                }
+
+                if (dayAvail.start_time && dayAvail.end_time) {
+                    try {
+                        const timeToMinutes = (tStr) => {
+                            if (!tStr) return 0;
+                            const [h, m] = tStr.split(":").map(Number);
+                            return h * 60 + m;
+                        };
+                        const [slotStartStr, slotEndStr] = slotId.split("-").map((s) => s.trim());
+                        const slotStart = timeToMinutes(slotStartStr);
+                        const slotEnd = timeToMinutes(slotEndStr);
+
+                        const availStart = timeToMinutes(dayAvail.start_time);
+                        const availEnd = timeToMinutes(dayAvail.end_time);
+
+                        return slotStart >= availStart && slotEnd <= availEnd;
+                    } catch (e) {
+                        return true;
+                    }
+                }
+                return true;
+            })();
+
+            // If the teacher is already teaching at this slot (double-booked), exclude them
+            if (stats.isBookedAtSlot) {
+                return;
+            }
+
+            const teacherAssignments = teacher.assignments ?? [];
+
+            // Filter assignments that match the current grade section
+            const gradeAssignments = teacherAssignments.filter(
+                (a) => String(a.grade_section_id) === String(gradeId),
+            );
+
+            const hasGradeAssignment = gradeAssignments.length > 0;
+            const maxDailyClasses = Number(teacher.max_daily_classes ?? 6);
+            const reachedDailyLimit = stats.dailyClassCount >= maxDailyClasses;
+
+            if (hasGradeAssignment) {
+                gradeAssignments.forEach((assignment) => {
+                    const subjectName = subjectMap[assignment.subject_id] || "Unknown Subject";
+                    const isSubjectAlreadyScheduled = scheduledSubjectsInGradeOnDay.has(subjectName.toLowerCase());
+
+                    let match = 95;
+                    let reason = "";
+                    let priority = 1; // 1 = First Priority (Not Assigned), 2 = Limit reached, 3 = Conflict/Profile issue
+
+                    if (!isAvailableByProfile) {
+                        match -= 30;
+                        reason = "Slot is outside teacher's profile availability hours.";
+                        priority = 3;
+                    } else if (isSubjectAlreadyScheduled) {
+                        match -= 25;
+                        reason = `Subject ${subjectName} is already scheduled in this grade today.`;
+                        priority = 3;
+                    } else if (reachedDailyLimit) {
+                        match -= 15;
+                        reason = `Teacher reached max daily classes limit (${stats.dailyClassCount}/${maxDailyClasses}).`;
+                        priority = 2;
+                    } else {
+                        reason = `Assigned to teach ${subjectName}. Availability: ${stats.dailyClassCount}/${maxDailyClasses} classes today.`;
+                        priority = 1;
+                    }
+
+                    list.push({
+                        teacherName: teacher.full_name,
+                        subjectName,
+                        match,
+                        reason,
+                        priority,
+                        badge: priority === 1 ? "Not Assigned" : priority === 2 ? "Limit Reached" : "Conflict/Inactive",
+                        teacher,
+                        aiNotes: teacher.ai_context_notes,
+                    });
+                });
+            } else {
+                // Other recommendations: teacher has no assignment for this grade, but is free
+                let match = 60;
+                let reason = "No teaching assignment defined for this grade/section.";
+                let priority = 4; // Lower priority
+
+                if (!isAvailableByProfile) {
+                    match -= 20;
+                    reason += " Also outside profile availability hours.";
+                }
+
+                list.push({
+                    teacherName: teacher.full_name,
+                    subjectName: "No Assignment",
+                    match,
+                    reason,
+                    priority,
+                    badge: "No Assignment",
+                    teacher,
+                    aiNotes: teacher.ai_context_notes,
+                });
+            }
+        });
+
+        // Sort: Priority first (1 is highest), then Match percentage descending
+        return list.sort((a, b) => {
+            if (a.priority !== b.priority) {
+                return a.priority - b.priority;
+            }
+            return b.match - a.match;
+        });
+    }, [activeSlot, teachersQuery.data, latestRun, subjectMap]);
 
     return (
         <div className="mx-auto max-w-[1600px] space-y-6">
@@ -396,7 +576,34 @@ const ClientDashboardPage = () => {
                                                         className="min-h-28 border-l border-outline-variant/30 px-3 py-3"
                                                     >
                                                         {assignment ? (
-                                                            <article className="h-full rounded-xl bg-white p-4 shadow-sm ring-1 ring-outline-variant/30">
+                                                            <article className="relative group h-full rounded-xl bg-white p-4 pr-8 shadow-sm ring-1 ring-outline-variant/30">
+                                                                <button
+                                                                    type="button"
+                                                                    className="absolute right-2 top-2 z-20 flex h-5 w-5 items-center justify-center rounded-full bg-error/10 text-error hover:bg-error hover:text-white transition disabled:opacity-50 pointer-events-auto cursor-pointer"
+                                                                    title="Remove allocation"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        console.log("Remove allocation clicked, assignment:", assignment);
+                                                                        if (!assignment.id) {
+                                                                            alert("Error: Assignment ID is missing. Please reload the page.");
+                                                                            return;
+                                                                        }
+                                                                        if (window.confirm(`Remove assignment of ${assignment.teacher} for ${assignment.subject}?`)) {
+                                                                            deleteMutation.mutate(assignment.id, {
+                                                                                onSuccess: () => {
+                                                                                    latestRunQuery.refetch();
+                                                                                },
+                                                                                onError: (err) => {
+                                                                                    console.error("Deletion failed:", err);
+                                                                                    alert(getApiErrorMessage(err, "Failed to remove allocation."));
+                                                                                }
+                                                                            });
+                                                                        }
+                                                                    }}
+                                                                    disabled={deleteMutation.isPending}
+                                                                >
+                                                                    <X className="h-3 w-3" />
+                                                                </button>
                                                                 <h4 className="font-semibold text-on-surface">
                                                                     {assignment.subject}
                                                                 </h4>
@@ -410,9 +617,12 @@ const ClientDashboardPage = () => {
                                                                 className="flex h-full min-h-20 w-full items-center justify-center rounded-xl border border-dashed border-primary bg-surface-container-lowest px-3 py-4 text-center font-label text-xs uppercase text-primary transition hover:bg-surface-container-highest"
                                                                 onClick={() =>
                                                                     setActiveSlot({
-                                                                        day: day.label,
-                                                                        time: slot.label,
-                                                                        grade: selectedGrade?.name ?? "Selected Grade",
+                                                                        dayId: day.id,
+                                                                        dayLabel: day.label,
+                                                                        slotId: slot.id,
+                                                                        slotLabel: slot.label,
+                                                                        gradeId: selectedGradeId,
+                                                                        gradeName: selectedGrade?.name ?? "Selected Grade",
                                                                     })
                                                                 }
                                                             >
@@ -433,8 +643,8 @@ const ClientDashboardPage = () => {
 
             {activeSlot ? (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-inverse-surface/40 px-4">
-                    <section className="w-full max-w-lg rounded-xl bg-surface-container-lowest p-6 shadow-xl">
-                        <div className="mb-5 flex items-start justify-between gap-4">
+                    <section className="w-full max-w-lg rounded-xl bg-surface-container-lowest p-6 shadow-xl max-h-[90vh] flex flex-col">
+                        <div className="mb-5 flex items-start justify-between gap-4 shrink-0">
                             <div className="flex gap-3">
                                 <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary text-on-primary">
                                     <Users className="h-5 w-5" aria-hidden="true" />
@@ -442,7 +652,7 @@ const ClientDashboardPage = () => {
                                 <div>
                                     <h3 className="text-xl font-semibold text-on-surface">Suggest Teacher</h3>
                                     <p className="mt-1 text-sm text-on-surface-variant">
-                                        {activeSlot.grade}, {activeSlot.day}, {activeSlot.time}
+                                        {activeSlot.gradeName}, {activeSlot.dayLabel}, {activeSlot.slotLabel}
                                     </p>
                                 </div>
                             </div>
@@ -456,30 +666,88 @@ const ClientDashboardPage = () => {
                             </button>
                         </div>
 
-                        <div className="space-y-3">
-                            {suggestions.map((teacher) => (
-                                <article
-                                    key={teacher.name}
-                                    className="flex flex-col justify-between gap-3 rounded-xl border border-outline-variant/30 bg-white p-4 shadow-sm sm:flex-row sm:items-center"
-                                >
-                                    <div>
-                                        <div className="flex flex-wrap items-center gap-2">
-                                            <h4 className="font-semibold text-on-surface">{teacher.name}</h4>
-                                            <span className="rounded-full bg-secondary px-2.5 py-1 font-label text-xs font-semibold text-on-secondary">
-                                                {teacher.match}% match
-                                            </span>
-                                        </div>
-                                        <p className="mt-1 text-sm text-on-surface-variant">{teacher.reason}</p>
-                                    </div>
-                                    <button
-                                        type="button"
-                                        className="rounded-lg bg-primary px-4 py-2 font-label text-xs font-semibold text-on-primary transition hover:bg-primary/90"
-                                        onClick={() => setActiveSlot(null)}
-                                    >
-                                        Assign
-                                    </button>
-                                </article>
-                            ))}
+                        <div className="space-y-3 overflow-y-auto pr-1 flex-1">
+                            {teachersQuery.isLoading || subjectsQuery.isLoading ? (
+                                <div className="flex flex-col items-center justify-center py-12 text-sm text-on-surface-variant gap-3">
+                                    <LoaderCircle className="h-6 w-6 animate-spin text-primary" />
+                                    <span>Analyzing teacher availabilities...</span>
+                                </div>
+                            ) : computedSuggestions.length === 0 ? (
+                                <div className="text-center py-12 text-sm text-on-surface-variant">
+                                    No available teachers found for this slot.
+                                </div>
+                            ) : (
+                                computedSuggestions.map((suggestion, idx) => {
+                                    const isPriority1 = suggestion.priority === 1;
+                                    const isPriority2 = suggestion.priority === 2;
+
+                                    let badgeColor = "bg-slate-100 text-slate-700 border-slate-200/80";
+                                    if (isPriority1) {
+                                        badgeColor = "bg-emerald-50 text-emerald-700 border-emerald-200/80";
+                                    } else if (isPriority2) {
+                                        badgeColor = "bg-amber-50 text-amber-700 border-amber-200/80";
+                                    }
+
+                                    return (
+                                        <article
+                                            key={`${suggestion.teacherName}-${suggestion.subjectName}-${idx}`}
+                                            className="flex flex-col justify-between gap-3 rounded-xl border border-outline-variant/30 bg-white p-4 shadow-sm sm:flex-row sm:items-start transition hover:border-primary/50"
+                                        >
+                                            <div className="space-y-2">
+                                                <div className="flex flex-wrap items-center gap-2">
+                                                    <h4 className="font-semibold text-on-surface">{suggestion.teacherName}</h4>
+                                                    <span className={`rounded-full px-2.5 py-0.5 border text-[11px] font-semibold tracking-wide capitalize ${badgeColor}`}>
+                                                        {suggestion.badge}
+                                                    </span>
+                                                    <span className="rounded-full bg-secondary px-2.5 py-0.5 font-label text-[11px] font-semibold text-on-secondary">
+                                                        {suggestion.match}% match
+                                                    </span>
+                                                </div>
+                                                <p className="text-sm font-medium text-primary">
+                                                    Subject: {suggestion.subjectName}
+                                                </p>
+                                                <p className="text-xs text-on-surface-variant leading-relaxed">
+                                                    {suggestion.reason}
+                                                </p>
+                                                {suggestion.aiNotes && (
+                                                    <div className="mt-2 flex items-start gap-1.5 rounded-lg bg-surface-container px-2.5 py-1.5 text-[11px] text-on-surface-variant">
+                                                        <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+                                                        <span>
+                                                            <strong>AI Note:</strong> {suggestion.aiNotes}
+                                                        </span>
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <button
+                                                type="button"
+                                                className="rounded-lg bg-primary px-4 py-2 font-label text-xs font-semibold text-on-primary transition hover:bg-primary/90 shrink-0 flex items-center gap-1.5 disabled:opacity-85 disabled:cursor-wait"
+                                                disabled={assignMutation.isPending}
+                                                onClick={() => {
+                                                    assignMutation.mutate({
+                                                        grade_section_id: Number(activeSlot.gradeId),
+                                                        day: activeSlot.dayId,
+                                                        time_slot: activeSlot.slotId,
+                                                        teacher: suggestion.teacherName,
+                                                        subject: suggestion.subjectName,
+                                                    }, {
+                                                        onSuccess: () => {
+                                                            setActiveSlot(null);
+                                                        },
+                                                        onError: (err) => {
+                                                            alert(getApiErrorMessage(err, "Failed to assign teacher."));
+                                                        }
+                                                    });
+                                                }}
+                                            >
+                                                {assignMutation.isPending ? (
+                                                    <LoaderCircle className="h-3 w-3 animate-spin" />
+                                                ) : null}
+                                                Assign
+                                            </button>
+                                        </article>
+                                    );
+                                })
+                            )}
                         </div>
                     </section>
                 </div>
@@ -489,3 +757,4 @@ const ClientDashboardPage = () => {
 };
 
 export default ClientDashboardPage;
+

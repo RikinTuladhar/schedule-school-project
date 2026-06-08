@@ -34,6 +34,77 @@ class MasterScheduleController extends BaseController
         ], 202);
     }
 
+    public function assign(Request $request)
+    {
+        $schoolId = $this->schoolId($request);
+
+        if (! $schoolId) {
+            return $this->sendErrorResponse('Client school context not found.', [], 403);
+        }
+
+        $validated = $request->validate([
+            'grade_section_id' => 'required|integer|exists:grade_sections,id',
+            'day' => 'required|string|max:5',
+            'time_slot' => 'required|string|max:50',
+            'teacher' => 'required|string|max:255',
+            'subject' => 'required|string|max:255',
+        ]);
+
+        $gradeSection = \App\Models\GradeSection::query()
+            ->where('school_id', $schoolId)
+            ->where('id', $validated['grade_section_id'])
+            ->first();
+
+        if (! $gradeSection) {
+            return $this->sendErrorResponse('Grade section not found or unauthorized.', [], 422);
+        }
+
+        // Find or create the latest run for the school
+        $run = MasterScheduleRun::query()
+            ->where('school_id', $schoolId)
+            ->latest()
+            ->first();
+
+        if (! $run) {
+            $run = MasterScheduleRun::create([
+                'school_id' => $schoolId,
+                'status' => 'completed',
+            ]);
+        }
+
+        $entry = MasterScheduleEntry::updateOrCreate(
+            [
+                'master_schedule_run_id' => $run->id,
+                'school_id' => $schoolId,
+                'grade_section_id' => $validated['grade_section_id'],
+                'day' => $validated['day'],
+                'time_slot' => $validated['time_slot'],
+            ],
+            [
+                'grade_section' => $gradeSection->name ?? 'Grade Section',
+                'teacher' => $validated['teacher'],
+                'subject' => $validated['subject'],
+            ]
+        );
+
+        return $this->sendResponse('Teacher assigned successfully', [
+            'entry' => $entry,
+        ]);
+    }
+
+    public function destroyEntry(Request $request, MasterScheduleEntry $entry)
+    {
+        $schoolId = $this->schoolId($request);
+
+        if (! $schoolId || (int) $entry->school_id !== (int) $schoolId) {
+            return $this->sendErrorResponse('Unauthorized.', [], 403);
+        }
+
+        $entry->delete();
+
+        return $this->sendResponse('Allocation removed successfully');
+    }
+
     public function latest(Request $request)
     {
         $schoolId = $this->schoolId($request);

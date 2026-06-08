@@ -1,6 +1,8 @@
 import {
     Bell,
     BookOpen,
+    CalendarDays,
+    ClipboardList,
     DraftingCompass,
     GraduationCap,
     LayoutDashboard,
@@ -20,6 +22,8 @@ import { useClient } from "@/context/ClientContext";
 const navItems = [
     { label: "Dashboard", to: "/client/dashboard", icon: LayoutDashboard },
     { label: "Template Builder", to: "/client/assignment-grid", icon: DraftingCompass },
+    { label: "Academic Record", to: "/client/academic-records", icon: ClipboardList },
+    { label: "Teacher Routines", to: "/client/teacher-routines", icon: CalendarDays },
     { label: "Grades", to: "/client/grades", icon: GraduationCap },
     { label: "Subjects", to: "/client/subjects", icon: BookOpen },
     { label: "Teacher Profiles", to: "/client/teachers", icon: UserSearch },

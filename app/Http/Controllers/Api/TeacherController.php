@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\BaseController;
+use App\Models\MasterScheduleEntry;
 use App\Models\Teacher;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -85,6 +86,12 @@ class TeacherController extends BaseController
         if (! $this->canAccess($request, $teacher)) {
             return $this->sendErrorResponse('Teacher not found.', [], 404);
         }
+
+        // Remove all schedule entries allocated to this teacher before deleting the teacher record.
+        MasterScheduleEntry::query()
+            ->where('school_id', $teacher->school_id)
+            ->where('teacher', $teacher->full_name)
+            ->delete();
 
         $teacher->delete();
 

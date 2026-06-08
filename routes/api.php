@@ -30,6 +30,8 @@ Route::controller(ClientAuthController::class)->group(function () {
         Route::apiResource('teachers', TeacherController::class);
         Route::apiResource('schedule-templates', ScheduleTemplateController::class);
         Route::post('/master-schedules/generate', [MasterScheduleController::class, 'generate']);
+        Route::post('/master-schedules/assign', [MasterScheduleController::class, 'assign']);
+        Route::delete('/master-schedules/entries/{entry}', [MasterScheduleController::class, 'destroyEntry']);
         Route::get('/master-schedules/latest', [MasterScheduleController::class, 'latest']);
         Route::get('/master-schedules/{masterScheduleRun}', [MasterScheduleController::class, 'show']);
     });
