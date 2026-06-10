@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 
-const defaultDayOrder = ["M", "T", "W", "Th", "F"];
+const defaultDayOrder = ["M", "T", "W", "Th", "F", "Sa", "Su"];
 
 const dayLabels = {
     M: "Monday",
@@ -29,6 +29,8 @@ const dayLabels = {
     W: "Wednesday",
     Th: "Thursday",
     F: "Friday",
+    Sa: "Saturday",
+    Su: "Sunday",
 };
 
 const formatPeriodType = (type) => {
@@ -37,7 +39,15 @@ const formatPeriodType = (type) => {
 };
 
 const buildDays = (template) => {
-    const days = Array.isArray(template?.days) && template.days.length > 0 ? template.days : defaultDayOrder;
+    let days = Array.isArray(template?.days) && template.days.length > 0 ? template.days : ["M", "T", "W", "Th", "F"];
+
+    // Explicitly sort days to always start from Monday
+    days = [...days].sort((a, b) => {
+        const indexA = defaultDayOrder.indexOf(a);
+        const indexB = defaultDayOrder.indexOf(b);
+        return (indexA === -1 ? 99 : indexA) - (indexB === -1 ? 99 : indexB);
+    });
+
     return days.map((day) => ({
         id: day,
         label: dayLabels[day] ?? day,
@@ -126,8 +136,8 @@ const ClientTeacherRoutinePage = () => {
     }, [templates, selectedTemplateId]);
 
     // Build Days and Slots
-    const days = useMemo(() => buildDays(activeTemplate), [activeTemplate]);
-    const timeSlots = useMemo(() => buildTimeSlots(activeTemplate), [activeTemplate]);
+    const days = buildDays(activeTemplate);
+    const timeSlots = buildTimeSlots(activeTemplate);
     const gridTemplateColumns = `140px repeat(${Math.max(days.length, 1)}, minmax(160px, 1fr))`;
 
     // Map scheduled classes for the selected teacher from the latest master schedule run

@@ -321,11 +321,9 @@ const ClientDashboardPage = () => {
                 return true;
             })();
 
-            // If the teacher is already teaching at this slot (double-booked), exclude them
+            // If the teacher is already teaching at this slot (double-booked), mark as conflict
             // UNLESS allow_multiple_sessions is true
-            if (stats.isBookedAtSlot && !teacher.allow_multiple_sessions) {
-                return;
-            }
+            const isDoubleBookedConflict = stats.isBookedAtSlot && !teacher.allow_multiple_sessions;
 
             const teacherAssignments = teacher.assignments ?? [];
 
@@ -347,7 +345,11 @@ const ClientDashboardPage = () => {
                     let reason = "";
                     let priority = 1; // 1 = First Priority (Not Assigned), 2 = Limit reached, 3 = Conflict/Profile issue
 
-                    if (!isAvailableByProfile) {
+                    if (isDoubleBookedConflict) {
+                        match -= 40;
+                        reason = "Already teaching at this exact time.";
+                        priority = 3;
+                    } else if (!isAvailableByProfile) {
                         match -= 30;
                         reason = "Slot is outside teacher's profile availability hours.";
                         priority = 3;
@@ -381,6 +383,11 @@ const ClientDashboardPage = () => {
                 let reason = "No teaching assignment defined for this grade/section.";
                 let priority = 4; // Lower priority
 
+                if (isDoubleBookedConflict) {
+                    match -= 30;
+                    reason += " Teacher is already scheduled at this exact time.";
+                    priority = 5;
+                }
                 if (!isAvailableByProfile) {
                     match -= 20;
                     reason += " Also outside profile availability hours.";

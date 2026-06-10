@@ -72,6 +72,25 @@ class ProcessGradeScheduleJob implements ShouldQueue
             'metadata' => $entry->metadata,
         ])->values()->all();
 
+        // If a teacher has a locked (fixed) entry for a subject in this grade section,
+        // we set their sessions_per_week to 0 so the auto-scheduler does not assign any additional slots.
+        if (isset($context['teachers'])) {
+            foreach ($context['teachers'] as &$teacher) {
+                if (isset($teacher['assignments'])) {
+                    foreach ($teacher['assignments'] as &$assignment) {
+                        $hasFixed = $fixedEntries->contains(function (MasterScheduleEntry $fixed) use ($teacher, $assignment) {
+                            return strcasecmp(trim($fixed->teacher), trim($teacher['full_name'])) === 0
+                                && strcasecmp(trim($fixed->subject), trim($assignment['subject'])) === 0;
+                        });
+                        if ($hasFixed) {
+                            $assignment['sessions_per_week'] = 0;
+                        }
+                    }
+                }
+            }
+            unset($teacher, $assignment);
+        }
+
         Log::info("Allocation of teachers in timetable (Backtracking) started for Section: {$gradeSection->name}");
         $btResult = $this->solveScheduleWithBacktracking($context);
 
