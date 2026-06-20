@@ -18,13 +18,14 @@ export function useGenerateMasterSchedule() {
     });
 }
 
-export async function assignTeacherToSlot({ grade_section_id, day, time_slot, teacher, subject }) {
+export async function assignTeacherToSlot({ grade_section_id, day, time_slot, teacher, subject, is_fixed = false }) {
     const res = await axiosInstance.post("/master-schedules/assign", {
         grade_section_id,
         day,
         time_slot,
         teacher,
         subject,
+        is_fixed,
     });
     return res?.data?.data?.entry ?? null;
 }
@@ -71,4 +72,3 @@ export function useToggleFixedEntry() {
         },
     });
 }
-

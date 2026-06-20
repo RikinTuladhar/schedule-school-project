@@ -5,7 +5,7 @@ import { useGenerateMasterSchedule, useAssignTeacherToSlot, useDeleteTeacherFrom
 import { useGetScheduleTemplates } from "@/apis/schedule-template/get.api";
 import { useGetTeachers } from "@/apis/teacher/get.api";
 import { useGetSubjects } from "@/apis/subject/get.api";
-import { Clock3, LoaderCircle, Sparkles, Users, X, Info, Lock, Unlock, Download } from "lucide-react";
+import { BookOpen, Clock3, LoaderCircle, Sparkles, Users, X, Info, Lock, Unlock, Download } from "lucide-react";
 import { useEffect, useMemo, useState, useRef } from "react";
 import { useReactToPrint } from "react-to-print";
 
@@ -35,6 +35,10 @@ const formatPeriodType = (type) => {
     const normalized = String(type || "academic").toLowerCase();
     return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 };
+
+const normalizeSubjectKey = (subject) => String(subject || "").trim().toLowerCase();
+
+const formatWeeklyCount = (count) => `${count} ${count === 1 ? "session" : "sessions"}/week`;
 
 const buildDays = (template) => {
     let days = Array.isArray(template?.days) && template.days.length > 0 ? template.days : ["M", "T", "W", "Th", "F"];
@@ -175,6 +179,7 @@ const ClientDashboardPage = () => {
     const [activeSlot, setActiveSlot] = useState(null);
     const [markAsFixed, setMarkAsFixed] = useState(false);
     const [suggestionSearchQuery, setSuggestionSearchQuery] = useState("");
+    const [selectedSubjectKey, setSelectedSubjectKey] = useState("");
     const contentRef = useRef(null);
 
     const templatesById = useMemo(() => {
@@ -211,9 +216,59 @@ const ClientDashboardPage = () => {
     const gridTemplateColumns = `150px repeat(${Math.max(days.length, 1)}, minmax(170px, 1fr))`;
     const latestRun = latestRunQuery.data;
     const schedule = useMemo(() => buildScheduleMap(latestRun, selectedGradeId), [latestRun, selectedGradeId]);
+    const selectedGradeEntries = useMemo(() => {
+        const gradeSchedule = latestRun?.schedules?.find(
+            (item) => String(item.grade_section_id) === String(selectedGradeId),
+        );
+
+        return gradeSchedule?.entries ?? [];
+    }, [latestRun, selectedGradeId]);
+    const subjectWeeklyCounts = useMemo(() => {
+        const counts = new Map();
+
+        selectedGradeEntries.forEach((entry) => {
+            const subject = String(entry.subject || "").trim();
+            const key = normalizeSubjectKey(subject);
+
+            if (!key) {
+                return;
+            }
+
+            const existing = counts.get(key) ?? {
+                key,
+                name: subject,
+                count: 0,
+            };
+
+            counts.set(key, {
+                ...existing,
+                count: existing.count + 1,
+            });
+        });
+
+        return Array.from(counts.values()).sort((a, b) => {
+            if (b.count !== a.count) {
+                return b.count - a.count;
+            }
+
+            return a.name.localeCompare(b.name, undefined, { numeric: true });
+        });
+    }, [selectedGradeEntries]);
+    const selectedSubject = useMemo(() => {
+        return subjectWeeklyCounts.find((subject) => subject.key === selectedSubjectKey) ?? null;
+    }, [selectedSubjectKey, subjectWeeklyCounts]);
+    const totalWeeklyAssignedSessions = useMemo(() => {
+        return selectedGradeEntries.filter((entry) => normalizeSubjectKey(entry.subject)).length;
+    }, [selectedGradeEntries]);
     const isGenerating = generateMutation.isPending || runningStatuses.has(latestRun?.status);
     const queueStatus = getQueueStatus(latestRun, generateMutation.isPending);
     const scheduleError = generateMutation.error || latestRunQuery.error || gradeDataQuery.error || templatesQuery.error;
+
+    useEffect(() => {
+        if (selectedSubjectKey && !subjectWeeklyCounts.some((subject) => subject.key === selectedSubjectKey)) {
+            setSelectedSubjectKey("");
+        }
+    }, [selectedSubjectKey, subjectWeeklyCounts]);
 
     const handleGenerate = () => {
         generateMutation.mutate();
@@ -268,15 +323,15 @@ const ClientDashboardPage = () => {
             });
         });
 
-        // 2. Identify which subjects are already scheduled in this grade section on this day
-        // to respect constraint: max one subject session per day per class
-        const scheduledSubjectsInGradeOnDay = new Set();
+        // 2. Identify which subjects are already scheduled in this grade section on this day.
+        // This is a subject/day warning, not a teacher double-booking warning.
+        const scheduledSubjectsInGradeOnDay = new Map();
         const currentGradeSchedule = latestRun?.schedules?.find(
             (item) => String(item.grade_section_id) === String(gradeId),
         );
         (currentGradeSchedule?.entries ?? []).forEach((entry) => {
             if (entry.day === dayId && entry.subject) {
-                scheduledSubjectsInGradeOnDay.add(entry.subject.toLowerCase());
+                scheduledSubjectsInGradeOnDay.set(entry.subject.toLowerCase(), entry);
             }
         });
 
@@ -339,30 +394,37 @@ const ClientDashboardPage = () => {
             if (hasGradeAssignment) {
                 gradeAssignments.forEach((assignment) => {
                     const subjectName = subjectMap[assignment.subject_id] || "Unknown Subject";
-                    const isSubjectAlreadyScheduled = scheduledSubjectsInGradeOnDay.has(subjectName.toLowerCase());
+                    const scheduledSubjectEntry = scheduledSubjectsInGradeOnDay.get(subjectName.toLowerCase());
+                    const isSubjectAlreadyScheduled = Boolean(scheduledSubjectEntry);
 
                     let match = 95;
                     let reason = "";
+                    let badge = "";
                     let priority = 1; // 1 = First Priority (Not Assigned), 2 = Limit reached, 3 = Conflict/Profile issue
 
                     if (isDoubleBookedConflict) {
                         match -= 40;
                         reason = "Already teaching at this exact time.";
+                        badge = "Already Booked";
                         priority = 3;
                     } else if (!isAvailableByProfile) {
                         match -= 30;
                         reason = "Slot is outside teacher's profile availability hours.";
+                        badge = "Outside Hours";
                         priority = 3;
                     } else if (isSubjectAlreadyScheduled) {
                         match -= 25;
-                        reason = `Subject ${subjectName} is already scheduled in this grade today.`;
+                        reason = `${subjectName} is already scheduled for this grade on ${dayLabel} at ${scheduledSubjectEntry.time_slot} with ${scheduledSubjectEntry.teacher}. Assigning here would create another ${subjectName} class on the same day.`;
+                        badge = "Already Today";
                         priority = 3;
                     } else if (reachedDailyLimit) {
                         match -= 15;
                         reason = `Teacher reached max daily classes limit (${stats.dailyClassCount}/${maxDailyClasses}).`;
+                        badge = "Limit Reached";
                         priority = 2;
                     } else {
                         reason = `Assigned to teach ${subjectName}. Availability: ${stats.dailyClassCount}/${maxDailyClasses} classes today.`;
+                        badge = "Available";
                         priority = 1;
                     }
 
@@ -372,7 +434,7 @@ const ClientDashboardPage = () => {
                         match,
                         reason,
                         priority,
-                        badge: priority === 1 ? "Not Assigned" : priority === 2 ? "Limit Reached" : "Conflict/Inactive",
+                        badge,
                         teacher,
                         aiNotes: teacher.ai_context_notes,
                     });
@@ -572,6 +634,13 @@ const ClientDashboardPage = () => {
 
                                 {timeSlots.map((slot) => {
                                     const isBlocked = slot.templateType !== "academic";
+                                    const rowHasSelectedSubject =
+                                        selectedSubjectKey &&
+                                        days.some(
+                                            (day) =>
+                                                normalizeSubjectKey(schedule[slot.id]?.[day.id]?.subject) ===
+                                                selectedSubjectKey,
+                                        );
 
                                     return (
                                         <div
@@ -579,6 +648,8 @@ const ClientDashboardPage = () => {
                                             className={`grid border-b border-outline-variant/20 ${
                                                 isBlocked
                                                     ? "schedule-stripes bg-surface-container-highest opacity-80"
+                                                    : rowHasSelectedSubject
+                                                      ? "bg-primary/5"
                                                     : "bg-background"
                                             }`}
                                             style={{ gridTemplateColumns }}
@@ -620,12 +691,21 @@ const ClientDashboardPage = () => {
                                                                                         {assignment ? (
                                                             (() => {
                                                                 const isFixed = assignment.metadata?.is_fixed === true;
+                                                                const assignmentSubjectKey = normalizeSubjectKey(assignment.subject);
+                                                                const isHighlightedSubject =
+                                                                    selectedSubjectKey && assignmentSubjectKey === selectedSubjectKey;
+                                                                const isMutedBySubjectFilter =
+                                                                    selectedSubjectKey && assignmentSubjectKey !== selectedSubjectKey;
+                                                                const assignmentToneClass = isHighlightedSubject
+                                                                    ? "border border-primary/70 bg-primary/10 ring-primary/50 shadow-md"
+                                                                    : isMutedBySubjectFilter
+                                                                      ? "bg-white opacity-50 ring-outline-variant/20"
+                                                                      : isFixed
+                                                                        ? "bg-amber-50/40 border border-amber-300/60 ring-amber-300/40"
+                                                                        : "bg-white ring-outline-variant/30";
+
                                                                 return (
-                                                                    <article className={`relative group h-full rounded-xl p-4 pr-8 shadow-sm ring-1 transition ${
-                                                                        isFixed
-                                                                            ? "bg-amber-50/40 border border-amber-300/60 ring-amber-300/40"
-                                                                            : "bg-white ring-outline-variant/30"
-                                                                    }`}>
+                                                                    <article className={`relative group h-full rounded-xl p-4 pr-8 shadow-sm ring-1 transition ${assignmentToneClass}`}>
                                                                         <button
                                                                             type="button"
                                                                             className="absolute right-2 top-2 z-20 flex h-5 w-5 items-center justify-center rounded-full bg-error/10 text-error hover:bg-error hover:text-white transition disabled:opacity-50 pointer-events-auto cursor-pointer"
@@ -725,6 +805,76 @@ const ClientDashboardPage = () => {
                             </div>
                         </div>
                     )}
+
+                    {gradeOptions.length > 0 && timeSlots.length > 0 ? (
+                        <section className="border-t border-outline-variant/30 px-5 py-5 print:hidden">
+                            <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
+                                <div className="flex items-start gap-3">
+                                    <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                                        <BookOpen className="h-5 w-5" aria-hidden="true" />
+                                    </span>
+                                    <div>
+                                        <h4 className="text-lg font-semibold text-on-surface">Subject Weekly Counts</h4>
+                                        <p className="mt-1 text-sm text-on-surface-variant">
+                                            {selectedSubject
+                                                ? `${selectedSubject.name}: ${formatWeeklyCount(selectedSubject.count)} highlighted`
+                                                : `${formatWeeklyCount(totalWeeklyAssignedSessions)} assigned in this timetable`}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                {selectedSubject ? (
+                                    <button
+                                        type="button"
+                                        className="inline-flex items-center justify-center gap-2 rounded-lg border border-outline-variant/40 bg-background px-3 py-2 font-label text-xs font-semibold uppercase text-primary transition hover:border-primary/60 hover:bg-primary/5"
+                                        onClick={() => setSelectedSubjectKey("")}
+                                    >
+                                        <X className="h-4 w-4" aria-hidden="true" />
+                                        Clear Highlight
+                                    </button>
+                                ) : null}
+                            </div>
+
+                            {subjectWeeklyCounts.length === 0 ? (
+                                <div className="mt-4 rounded-lg border border-dashed border-outline-variant/50 bg-background px-4 py-5 text-sm text-on-surface-variant">
+                                    No subjects are assigned in this timetable yet.
+                                </div>
+                            ) : (
+                                <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                                    {subjectWeeklyCounts.map((subject) => {
+                                        const isSelected = subject.key === selectedSubjectKey;
+
+                                        return (
+                                            <button
+                                                key={subject.key}
+                                                type="button"
+                                                aria-pressed={isSelected}
+                                                className={`flex min-h-12 items-center justify-between gap-3 rounded-lg border px-4 py-3 text-left transition ${
+                                                    isSelected
+                                                        ? "border-primary bg-primary text-on-primary shadow-sm"
+                                                        : "border-outline-variant/40 bg-background text-on-surface hover:border-primary/60 hover:bg-primary/5"
+                                                }`}
+                                                onClick={() => setSelectedSubjectKey(isSelected ? "" : subject.key)}
+                                            >
+                                                <span className="min-w-0 truncate text-sm font-semibold">
+                                                    {subject.name}
+                                                </span>
+                                                <span
+                                                    className={`shrink-0 rounded-full px-2.5 py-1 font-label text-[11px] uppercase ${
+                                                        isSelected
+                                                            ? "bg-on-primary text-primary"
+                                                            : "bg-surface-container text-primary"
+                                                    }`}
+                                                >
+                                                    {formatWeeklyCount(subject.count)}
+                                                </span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </section>
+                    ) : null}
                 </main>
             </section>
 
@@ -844,7 +994,7 @@ const ClientDashboardPage = () => {
                                                         time_slot: activeSlot.slotId,
                                                         teacher: suggestion.teacherName,
                                                         subject: suggestion.subjectName,
-                                                        metadata: { is_fixed: markAsFixed }
+                                                        is_fixed: markAsFixed,
                                                     }, {
                                                         onSuccess: () => {
                                                             setActiveSlot(null);
@@ -874,4 +1024,3 @@ const ClientDashboardPage = () => {
 };
 
 export default ClientDashboardPage;
-
