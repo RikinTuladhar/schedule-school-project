@@ -40,6 +40,94 @@ const normalizeSubjectKey = (subject) => String(subject || "").trim().toLowerCas
 
 const formatWeeklyCount = (count) => `${count} ${count === 1 ? "session" : "sessions"}/week`;
 
+const formatClockTime = (time) => {
+    const value = String(time || "").trim();
+    const match = value.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+
+    if (!match) {
+        return value;
+    }
+
+    const hours = Number(match[1]);
+    const minutes = match[2];
+
+    if (Number.isNaN(hours) || hours < 0 || hours > 23) {
+        return value;
+    }
+
+    const period = hours >= 12 ? "PM" : "AM";
+    const displayHour = hours % 12 || 12;
+
+    return `${displayHour}:${minutes} ${period}`;
+};
+
+const formatTimeRange = (start, end) => `${formatClockTime(start)} - ${formatClockTime(end)}`;
+
+const formatTimeSlotLabel = (timeSlot) => {
+    const value = String(timeSlot || "").trim();
+    const parts = value.split(/\s*-\s*/);
+
+    if (parts.length === 2) {
+        return formatTimeRange(parts[0], parts[1]);
+    }
+
+    return formatClockTime(value);
+};
+
+const subjectHighlightPalette = [
+    {
+        row: "bg-sky-50",
+        card: "border border-sky-500/70 bg-sky-50 ring-sky-400/60 shadow-md",
+        button: "border-sky-500 bg-sky-600 text-white shadow-sm",
+        badge: "bg-white text-sky-700",
+        swatch: "bg-sky-500",
+    },
+    {
+        row: "bg-emerald-50",
+        card: "border border-emerald-500/70 bg-emerald-50 ring-emerald-400/60 shadow-md",
+        button: "border-emerald-500 bg-emerald-600 text-white shadow-sm",
+        badge: "bg-white text-emerald-700",
+        swatch: "bg-emerald-500",
+    },
+    {
+        row: "bg-amber-50",
+        card: "border border-amber-500/70 bg-amber-50 ring-amber-400/60 shadow-md",
+        button: "border-amber-500 bg-amber-500 text-slate-950 shadow-sm",
+        badge: "bg-white text-amber-800",
+        swatch: "bg-amber-500",
+    },
+    {
+        row: "bg-rose-50",
+        card: "border border-rose-500/70 bg-rose-50 ring-rose-400/60 shadow-md",
+        button: "border-rose-500 bg-rose-600 text-white shadow-sm",
+        badge: "bg-white text-rose-700",
+        swatch: "bg-rose-500",
+    },
+    {
+        row: "bg-cyan-50",
+        card: "border border-cyan-500/70 bg-cyan-50 ring-cyan-400/60 shadow-md",
+        button: "border-cyan-500 bg-cyan-600 text-white shadow-sm",
+        badge: "bg-white text-cyan-700",
+        swatch: "bg-cyan-500",
+    },
+    {
+        row: "bg-lime-50",
+        card: "border border-lime-500/70 bg-lime-50 ring-lime-400/60 shadow-md",
+        button: "border-lime-500 bg-lime-500 text-slate-950 shadow-sm",
+        badge: "bg-white text-lime-800",
+        swatch: "bg-lime-500",
+    },
+];
+
+const subjectHighlightStyleFor = (subjectKey, subjects) => {
+    const index = Math.max(
+        0,
+        subjects.findIndex((subject) => subject.key === subjectKey),
+    );
+
+    return subjectHighlightPalette[index % subjectHighlightPalette.length];
+};
+
 const buildDays = (template) => {
     let days = Array.isArray(template?.days) && template.days.length > 0 ? template.days : ["M", "T", "W", "Th", "F"];
 
@@ -67,7 +155,7 @@ const buildTimeSlots = (template) => {
 
         return {
             id,
-            label: `${period.start} - ${period.end}`,
+            label: formatTimeRange(period.start, period.end),
             templateType: type,
             title: type === "academic" ? "" : formatPeriodType(type),
         };
@@ -179,7 +267,7 @@ const ClientDashboardPage = () => {
     const [activeSlot, setActiveSlot] = useState(null);
     const [markAsFixed, setMarkAsFixed] = useState(false);
     const [suggestionSearchQuery, setSuggestionSearchQuery] = useState("");
-    const [selectedSubjectKey, setSelectedSubjectKey] = useState("");
+    const [selectedSubjectKeys, setSelectedSubjectKeys] = useState([]);
     const contentRef = useRef(null);
 
     const templatesById = useMemo(() => {
@@ -254,9 +342,13 @@ const ClientDashboardPage = () => {
             return a.name.localeCompare(b.name, undefined, { numeric: true });
         });
     }, [selectedGradeEntries]);
-    const selectedSubject = useMemo(() => {
-        return subjectWeeklyCounts.find((subject) => subject.key === selectedSubjectKey) ?? null;
-    }, [selectedSubjectKey, subjectWeeklyCounts]);
+    const selectedSubjectSet = useMemo(() => new Set(selectedSubjectKeys), [selectedSubjectKeys]);
+    const selectedSubjects = useMemo(() => {
+        return subjectWeeklyCounts.filter((subject) => selectedSubjectSet.has(subject.key));
+    }, [selectedSubjectSet, subjectWeeklyCounts]);
+    const selectedSubjectsWeeklyTotal = useMemo(() => {
+        return selectedSubjects.reduce((total, subject) => total + subject.count, 0);
+    }, [selectedSubjects]);
     const totalWeeklyAssignedSessions = useMemo(() => {
         return selectedGradeEntries.filter((entry) => normalizeSubjectKey(entry.subject)).length;
     }, [selectedGradeEntries]);
@@ -265,10 +357,13 @@ const ClientDashboardPage = () => {
     const scheduleError = generateMutation.error || latestRunQuery.error || gradeDataQuery.error || templatesQuery.error;
 
     useEffect(() => {
-        if (selectedSubjectKey && !subjectWeeklyCounts.some((subject) => subject.key === selectedSubjectKey)) {
-            setSelectedSubjectKey("");
+        const validKeys = new Set(subjectWeeklyCounts.map((subject) => subject.key));
+        const filteredKeys = selectedSubjectKeys.filter((key) => validKeys.has(key));
+
+        if (filteredKeys.length !== selectedSubjectKeys.length) {
+            setSelectedSubjectKeys(filteredKeys);
         }
-    }, [selectedSubjectKey, subjectWeeklyCounts]);
+    }, [selectedSubjectKeys, subjectWeeklyCounts]);
 
     const handleGenerate = () => {
         generateMutation.mutate();
@@ -308,6 +403,7 @@ const ClientDashboardPage = () => {
                 if (!teacherStats[tName]) {
                     teacherStats[tName] = {
                         isBookedAtSlot: false,
+                        bookedAtSlot: null,
                         dailyClassCount: 0,
                         scheduledEntries: [],
                     };
@@ -317,6 +413,11 @@ const ClientDashboardPage = () => {
                     teacherStats[tName].dailyClassCount += 1;
                     if (entry.time_slot === slotId) {
                         teacherStats[tName].isBookedAtSlot = true;
+                        teacherStats[tName].bookedAtSlot = {
+                            ...entry,
+                            grade_section: sectionSchedule.grade_section,
+                            grade_section_id: sectionSchedule.grade_section_id,
+                        };
                     }
                 }
                 teacherStats[tName].scheduledEntries.push(entry);
@@ -340,6 +441,7 @@ const ClientDashboardPage = () => {
         teachers.forEach((teacher) => {
             const stats = teacherStats[teacher.full_name] ?? {
                 isBookedAtSlot: false,
+                bookedAtSlot: null,
                 dailyClassCount: 0,
                 scheduledEntries: [],
             };
@@ -379,6 +481,12 @@ const ClientDashboardPage = () => {
             // If the teacher is already teaching at this slot (double-booked), mark as conflict
             // UNLESS allow_multiple_sessions is true
             const isDoubleBookedConflict = stats.isBookedAtSlot && !teacher.allow_multiple_sessions;
+            const bookedAtSlot = stats.bookedAtSlot;
+            const bookedAtSlotLabel = bookedAtSlot
+                ? `${bookedAtSlot.subject} in ${bookedAtSlot.grade_section ?? "another grade"} on ${
+                      dayLabels[bookedAtSlot.day] ?? bookedAtSlot.day
+                  } at ${formatTimeSlotLabel(bookedAtSlot.time_slot)}`
+                : "another class at this exact time";
 
             const teacherAssignments = teacher.assignments ?? [];
 
@@ -404,7 +512,7 @@ const ClientDashboardPage = () => {
 
                     if (isDoubleBookedConflict) {
                         match -= 40;
-                        reason = "Already teaching at this exact time.";
+                        reason = `${teacher.full_name} is already assigned to ${bookedAtSlotLabel}.`;
                         badge = "Already Booked";
                         priority = 3;
                     } else if (!isAvailableByProfile) {
@@ -414,7 +522,7 @@ const ClientDashboardPage = () => {
                         priority = 3;
                     } else if (isSubjectAlreadyScheduled) {
                         match -= 25;
-                        reason = `${subjectName} is already scheduled for this grade on ${dayLabel} at ${scheduledSubjectEntry.time_slot} with ${scheduledSubjectEntry.teacher}. Assigning here would create another ${subjectName} class on the same day.`;
+                        reason = `${subjectName} is already scheduled for this grade on ${dayLabel} at ${formatTimeSlotLabel(scheduledSubjectEntry.time_slot)} with ${scheduledSubjectEntry.teacher}. Assigning here would create another ${subjectName} class on the same day.`;
                         badge = "Already Today";
                         priority = 3;
                     } else if (reachedDailyLimit) {
@@ -447,7 +555,7 @@ const ClientDashboardPage = () => {
 
                 if (isDoubleBookedConflict) {
                     match -= 30;
-                    reason += " Teacher is already scheduled at this exact time.";
+                    reason += ` Teacher is already assigned to ${bookedAtSlotLabel}.`;
                     priority = 5;
                 }
                 if (!isAvailableByProfile) {
@@ -526,14 +634,14 @@ const ClientDashboardPage = () => {
                 </div>
             </header>
 
-            <section className="grid grid-cols-1 gap-6 xl:grid-cols-[300px_minmax(0,1fr)]">
-                <aside className="max-h-[calc(100vh-180px)] overflow-y-auto rounded-xl border border-outline-variant/30 bg-surface-container-lowest p-4 shadow-sm">
-                    <div className="mb-4">
+            <section className="space-y-4">
+                <aside className="rounded-xl border border-outline-variant/30 bg-surface-container-lowest p-4 shadow-sm">
+                    <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
                         <h3 className="text-xl font-semibold text-on-surface">Grades</h3>
                         <p className="text-sm text-on-surface-variant">Select a grade to inspect its schedule.</p>
                     </div>
 
-                    <div className="space-y-6">
+                    <div className="overflow-x-auto pb-1">
                         {gradeDataQuery.isLoading || templatesQuery.isLoading ? (
                             <div className="rounded-lg bg-surface-container px-4 py-3 text-sm text-on-surface-variant">
                                 Loading grades...
@@ -546,38 +654,40 @@ const ClientDashboardPage = () => {
                             </div>
                         ) : null}
 
-                        {gradeGroups.map((group) => (
-                            <div key={group.id}>
-                                <div className="mb-2 px-2 font-label text-xs uppercase tracking-wider text-primary">
-                                    {group.label}
-                                </div>
-                                <div className="space-y-2">
-                                    {group.grades.map((grade) => {
-                                        const isSelected = grade.id === selectedGradeId;
+                        <div className="flex min-w-max gap-3">
+                            {gradeGroups.map((group) => (
+                                <div key={group.id} className="flex items-center gap-2 rounded-lg bg-surface-container px-2 py-2">
+                                    <div className="whitespace-nowrap px-2 font-label text-xs uppercase tracking-wider text-primary">
+                                        {group.label}
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        {group.grades.map((grade) => {
+                                            const isSelected = grade.id === selectedGradeId;
 
-                                        return (
-                                            <button
-                                                key={grade.id}
-                                                type="button"
-                                                className={`flex w-full items-center justify-between rounded-lg px-4 py-3 text-left text-sm font-semibold transition ${
-                                                    isSelected
-                                                        ? "bg-primary text-on-primary"
-                                                        : "text-on-surface hover:bg-surface-container-highest"
-                                                }`}
-                                                onClick={() => setSelectedGradeId(grade.id)}
-                                            >
-                                                {grade.name}
-                                                {isSelected ? (
-                                                    <span className="rounded-full bg-on-primary px-2 py-0.5 font-label text-[10px] uppercase text-primary">
-                                                        Active
-                                                    </span>
-                                                ) : null}
-                                            </button>
-                                        );
-                                    })}
+                                            return (
+                                                <button
+                                                    key={grade.id}
+                                                    type="button"
+                                                    className={`inline-flex min-h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg px-4 py-2 text-sm font-semibold transition ${
+                                                        isSelected
+                                                            ? "bg-primary text-on-primary"
+                                                            : "text-on-surface hover:bg-surface-container-highest"
+                                                    }`}
+                                                    onClick={() => setSelectedGradeId(grade.id)}
+                                                >
+                                                    {grade.name}
+                                                    {isSelected ? (
+                                                        <span className="rounded-full bg-on-primary px-2 py-0.5 font-label text-[10px] uppercase text-primary">
+                                                            Active
+                                                        </span>
+                                                    ) : null}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
                                 </div>
-                            </div>
-                        ))}
+                            ))}
+                        </div>
                     </div>
                 </aside>
 
@@ -634,13 +744,12 @@ const ClientDashboardPage = () => {
 
                                 {timeSlots.map((slot) => {
                                     const isBlocked = slot.templateType !== "academic";
-                                    const rowHasSelectedSubject =
-                                        selectedSubjectKey &&
-                                        days.some(
-                                            (day) =>
-                                                normalizeSubjectKey(schedule[slot.id]?.[day.id]?.subject) ===
-                                                selectedSubjectKey,
-                                        );
+                                    const rowSelectedSubjectKey = days
+                                        .map((day) => normalizeSubjectKey(schedule[slot.id]?.[day.id]?.subject))
+                                        .find((subjectKey) => selectedSubjectSet.has(subjectKey));
+                                    const rowHighlightStyle = rowSelectedSubjectKey
+                                        ? subjectHighlightStyleFor(rowSelectedSubjectKey, subjectWeeklyCounts)
+                                        : null;
 
                                     return (
                                         <div
@@ -648,8 +757,8 @@ const ClientDashboardPage = () => {
                                             className={`grid border-b border-outline-variant/20 ${
                                                 isBlocked
                                                     ? "schedule-stripes bg-surface-container-highest opacity-80"
-                                                    : rowHasSelectedSubject
-                                                      ? "bg-primary/5"
+                                                    : rowHighlightStyle
+                                                      ? rowHighlightStyle.row
                                                     : "bg-background"
                                             }`}
                                             style={{ gridTemplateColumns }}
@@ -692,17 +801,29 @@ const ClientDashboardPage = () => {
                                                             (() => {
                                                                 const isFixed = assignment.metadata?.is_fixed === true;
                                                                 const assignmentSubjectKey = normalizeSubjectKey(assignment.subject);
+                                                                const assignmentHighlightStyle = subjectHighlightStyleFor(
+                                                                    assignmentSubjectKey,
+                                                                    subjectWeeklyCounts,
+                                                                );
                                                                 const isHighlightedSubject =
-                                                                    selectedSubjectKey && assignmentSubjectKey === selectedSubjectKey;
+                                                                    selectedSubjectSet.has(assignmentSubjectKey);
                                                                 const isMutedBySubjectFilter =
-                                                                    selectedSubjectKey && assignmentSubjectKey !== selectedSubjectKey;
+                                                                    selectedSubjectSet.size > 0 && !isHighlightedSubject;
                                                                 const assignmentToneClass = isHighlightedSubject
-                                                                    ? "border border-primary/70 bg-primary/10 ring-primary/50 shadow-md"
+                                                                    ? assignmentHighlightStyle.card
                                                                     : isMutedBySubjectFilter
                                                                       ? "bg-white opacity-50 ring-outline-variant/20"
                                                                       : isFixed
                                                                         ? "bg-amber-50/40 border border-amber-300/60 ring-amber-300/40"
                                                                         : "bg-white ring-outline-variant/30";
+                                                                const lockButtonClass = isFixed
+                                                                    ? isHighlightedSubject
+                                                                        ? "border border-slate-900/20 bg-white/80 text-slate-950 hover:bg-white"
+                                                                        : "bg-amber-100 text-amber-700 hover:bg-amber-200"
+                                                                    : "bg-surface-container text-on-surface-variant hover:bg-primary/10 hover:text-primary";
+                                                                const fixedLockIconClass = isHighlightedSubject
+                                                                    ? "text-slate-950"
+                                                                    : "text-amber-600";
 
                                                                 return (
                                                                     <article className={`relative group h-full rounded-xl p-4 pr-8 shadow-sm ring-1 transition ${assignmentToneClass}`}>
@@ -736,11 +857,7 @@ const ClientDashboardPage = () => {
 
                                                                         <button
                                                                             type="button"
-                                                                            className={`absolute right-2 top-8 z-20 flex h-5 w-5 items-center justify-center rounded-full transition pointer-events-auto cursor-pointer ${
-                                                                                isFixed
-                                                                                    ? "bg-amber-100 text-amber-700 hover:bg-amber-200"
-                                                                                    : "bg-surface-container text-on-surface-variant hover:bg-primary/10 hover:text-primary"
-                                                                            }`}
+                                                                            className={`absolute right-2 top-8 z-20 flex h-5 w-5 items-center justify-center rounded-full transition pointer-events-auto cursor-pointer ${lockButtonClass}`}
                                                                             title={isFixed ? "Unlock entry" : "Lock entry"}
                                                                             onClick={(e) => {
                                                                                 e.stopPropagation();
@@ -767,7 +884,7 @@ const ClientDashboardPage = () => {
                                                                                 {assignment.subject}
                                                                             </h4>
                                                                             {isFixed && (
-                                                                                <Lock className="h-3.5 w-3.5 text-amber-600 shrink-0" title="Fixed/Locked schedule entry" />
+                                                                                <Lock className={`h-3.5 w-3.5 shrink-0 ${fixedLockIconClass}`} title="Fixed/Locked schedule entry" />
                                                                             )}
                                                                         </div>
                                                                         <p className="mt-2 text-sm text-on-surface-variant">
@@ -779,7 +896,7 @@ const ClientDashboardPage = () => {
                                                         ) : (
                                                             <button
                                                                 type="button"
-                                                                className="flex h-full min-h-20 w-full items-center justify-center rounded-xl border border-dashed border-primary bg-surface-container-lowest px-3 py-4 text-center font-label text-xs uppercase text-primary transition hover:bg-surface-container-highest"
+                                                                className="flex h-full min-h-20 w-full items-center justify-center rounded-xl border border-dashed border-error/40 bg-error-container/20 px-3 py-4 text-center font-label text-xs uppercase text-error transition hover:bg-error-container/30"
                                                                 onClick={() => {
                                                                     setMarkAsFixed(false);
                                                                     setActiveSlot({
@@ -816,21 +933,23 @@ const ClientDashboardPage = () => {
                                     <div>
                                         <h4 className="text-lg font-semibold text-on-surface">Subject Weekly Counts</h4>
                                         <p className="mt-1 text-sm text-on-surface-variant">
-                                            {selectedSubject
-                                                ? `${selectedSubject.name}: ${formatWeeklyCount(selectedSubject.count)} highlighted`
+                                            {selectedSubjects.length === 1
+                                                ? `${selectedSubjects[0].name}: ${formatWeeklyCount(selectedSubjects[0].count)} highlighted`
+                                                : selectedSubjects.length > 1
+                                                  ? `${selectedSubjects.length} subjects highlighted, ${formatWeeklyCount(selectedSubjectsWeeklyTotal)} total`
                                                 : `${formatWeeklyCount(totalWeeklyAssignedSessions)} assigned in this timetable`}
                                         </p>
                                     </div>
                                 </div>
 
-                                {selectedSubject ? (
+                                {selectedSubjects.length > 0 ? (
                                     <button
                                         type="button"
                                         className="inline-flex items-center justify-center gap-2 rounded-lg border border-outline-variant/40 bg-background px-3 py-2 font-label text-xs font-semibold uppercase text-primary transition hover:border-primary/60 hover:bg-primary/5"
-                                        onClick={() => setSelectedSubjectKey("")}
+                                        onClick={() => setSelectedSubjectKeys([])}
                                     >
                                         <X className="h-4 w-4" aria-hidden="true" />
-                                        Clear Highlight
+                                        Clear Highlights
                                     </button>
                                 ) : null}
                             </div>
@@ -842,7 +961,8 @@ const ClientDashboardPage = () => {
                             ) : (
                                 <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
                                     {subjectWeeklyCounts.map((subject) => {
-                                        const isSelected = subject.key === selectedSubjectKey;
+                                        const isSelected = selectedSubjectSet.has(subject.key);
+                                        const subjectStyle = subjectHighlightStyleFor(subject.key, subjectWeeklyCounts);
 
                                         return (
                                             <button
@@ -851,18 +971,28 @@ const ClientDashboardPage = () => {
                                                 aria-pressed={isSelected}
                                                 className={`flex min-h-12 items-center justify-between gap-3 rounded-lg border px-4 py-3 text-left transition ${
                                                     isSelected
-                                                        ? "border-primary bg-primary text-on-primary shadow-sm"
+                                                        ? subjectStyle.button
                                                         : "border-outline-variant/40 bg-background text-on-surface hover:border-primary/60 hover:bg-primary/5"
                                                 }`}
-                                                onClick={() => setSelectedSubjectKey(isSelected ? "" : subject.key)}
+                                                onClick={() =>
+                                                    setSelectedSubjectKeys((current) =>
+                                                        current.includes(subject.key)
+                                                            ? current.filter((key) => key !== subject.key)
+                                                            : [...current, subject.key],
+                                                    )
+                                                }
                                             >
-                                                <span className="min-w-0 truncate text-sm font-semibold">
-                                                    {subject.name}
+                                                <span className="flex min-w-0 items-center gap-2 text-sm font-semibold">
+                                                    <span
+                                                        className={`h-3 w-3 shrink-0 rounded-full ${subjectStyle.swatch}`}
+                                                        aria-hidden="true"
+                                                    />
+                                                    <span className="truncate">{subject.name}</span>
                                                 </span>
                                                 <span
                                                     className={`shrink-0 rounded-full px-2.5 py-1 font-label text-[11px] uppercase ${
                                                         isSelected
-                                                            ? "bg-on-primary text-primary"
+                                                            ? subjectStyle.badge
                                                             : "bg-surface-container text-primary"
                                                     }`}
                                                 >

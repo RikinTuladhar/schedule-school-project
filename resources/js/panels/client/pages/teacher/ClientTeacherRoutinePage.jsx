@@ -38,6 +38,29 @@ const formatPeriodType = (type) => {
     return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 };
 
+const formatClockTime = (time) => {
+    const value = String(time || "").trim();
+    const match = value.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+
+    if (!match) {
+        return value;
+    }
+
+    const hours = Number(match[1]);
+    const minutes = match[2];
+
+    if (Number.isNaN(hours) || hours < 0 || hours > 23) {
+        return value;
+    }
+
+    const period = hours >= 12 ? "PM" : "AM";
+    const displayHour = hours % 12 || 12;
+
+    return `${displayHour}:${minutes} ${period}`;
+};
+
+const formatTimeRange = (start, end) => `${formatClockTime(start)} - ${formatClockTime(end)}`;
+
 const buildDays = (template) => {
     let days = Array.isArray(template?.days) && template.days.length > 0 ? template.days : ["M", "T", "W", "Th", "F"];
 
@@ -65,7 +88,7 @@ const buildTimeSlots = (template) => {
 
         return {
             id,
-            label: `${period.start} - ${period.end}`,
+            label: formatTimeRange(period.start, period.end),
             templateType: type,
             title: type === "academic" ? "" : formatPeriodType(type),
         };
