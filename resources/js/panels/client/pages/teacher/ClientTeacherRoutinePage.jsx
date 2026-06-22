@@ -10,8 +10,10 @@ import {
     Calendar, 
     CalendarDays, 
     Clock3, 
+    Download,
     GraduationCap, 
     Info, 
+    LoaderCircle,
     Printer, 
     Search, 
     Sparkles, 
@@ -115,6 +117,8 @@ const ClientTeacherRoutinePage = () => {
     const [searchQuery, setSearchQuery] = useState("");
     const [selectedTeacherId, setSelectedTeacherId] = useState("");
     const [selectedTemplateId, setSelectedTemplateId] = useState("");
+    const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
+    const [pdfError, setPdfError] = useState("");
 
     // Build lookup table for subjects
     const subjectMap = useMemo(() => {
@@ -245,6 +249,154 @@ const ClientTeacherRoutinePage = () => {
 
     const handlePrint = () => {
         window.print();
+    };
+
+    const handleDownloadPdf = async () => {
+        if (!selectedTeacher || isDownloadingPdf) {
+            return;
+        }
+
+        if (days.length === 0 || timeSlots.length === 0) {
+            setPdfError("No timetable data is available to download.");
+            return;
+        }
+
+        setPdfError("");
+        setIsDownloadingPdf(true);
+
+        try {
+            const { jsPDF } = await import("jspdf");
+            const teacherName = String(selectedTeacher.full_name || "teacher")
+                .trim()
+                .replace(/[^a-z0-9]+/gi, "-")
+                .replace(/^-|-$/g, "");
+
+            const pdf = new jsPDF({
+                orientation: "landscape",
+                unit: "mm",
+                format: "a4",
+            });
+            const pageWidth = pdf.internal.pageSize.getWidth();
+            const pageHeight = pdf.internal.pageSize.getHeight();
+            const margin = 10;
+            const timeColumnWidth = 38;
+            const dayColumnWidth = (pageWidth - (margin * 2) - timeColumnWidth) / days.length;
+            const tableHeaderHeight = 10;
+            const rowHeight = 14;
+
+            const drawDocumentHeader = () => {
+                pdf.setTextColor(2, 132, 199);
+                pdf.setFont("helvetica", "bold");
+                pdf.setFontSize(16);
+                pdf.text("Weekly Teaching Schedule", margin, 12);
+
+                pdf.setTextColor(15, 23, 42);
+                pdf.setFontSize(11);
+                pdf.text(String(selectedTeacher.full_name || "Teacher"), margin, 18);
+
+                pdf.setTextColor(71, 85, 105);
+                pdf.setFont("helvetica", "normal");
+                pdf.setFontSize(8);
+                pdf.text(
+                    `Employment: ${selectedTeacher.employment_type || "N/A"}  |  Weekly classes: ${totalWeeklyClasses}  |  Daily limit: ${selectedTeacher.max_daily_classes || "N/A"}`,
+                    margin,
+                    23,
+                );
+            };
+
+            const drawTableHeader = (startY) => {
+                pdf.setDrawColor(186, 230, 253);
+                pdf.setFillColor(224, 242, 254);
+                pdf.setTextColor(2, 132, 199);
+                pdf.setFont("helvetica", "bold");
+                pdf.setFontSize(8);
+
+                pdf.rect(margin, startY, timeColumnWidth, tableHeaderHeight, "FD");
+                pdf.text("TIME SLOT", margin + 2, startY + 6.3);
+
+                days.forEach((day, index) => {
+                    const cellX = margin + timeColumnWidth + (index * dayColumnWidth);
+                    pdf.rect(cellX, startY, dayColumnWidth, tableHeaderHeight, "FD");
+                    pdf.text(day.label.toUpperCase(), cellX + (dayColumnWidth / 2), startY + 6.3, { align: "center" });
+                });
+            };
+
+            drawDocumentHeader();
+            let currentY = 28;
+            drawTableHeader(currentY);
+            currentY += tableHeaderHeight;
+
+            timeSlots.forEach((slot) => {
+                if (currentY + rowHeight > pageHeight - margin) {
+                    pdf.addPage();
+                    drawDocumentHeader();
+                    currentY = 28;
+                    drawTableHeader(currentY);
+                    currentY += tableHeaderHeight;
+                }
+
+                const isBlocked = slot.templateType !== "academic";
+                pdf.setDrawColor(203, 213, 225);
+                pdf.setFillColor(isBlocked ? 241 : 255, isBlocked ? 245 : 255, isBlocked ? 249 : 255);
+                pdf.rect(margin, currentY, timeColumnWidth, rowHeight, "FD");
+                pdf.setTextColor(15, 23, 42);
+                pdf.setFont("helvetica", "bold");
+                pdf.setFontSize(7.5);
+                pdf.text(slot.label, margin + 2, currentY + 6);
+
+                if (isBlocked) {
+                    pdf.setTextColor(2, 132, 199);
+                    pdf.setFontSize(6.5);
+                    pdf.text(slot.title.toUpperCase(), margin + 2, currentY + 10.5);
+                }
+
+                days.forEach((day, index) => {
+                    const cellX = margin + timeColumnWidth + (index * dayColumnWidth);
+                    const assignment = teacherSchedule[slot.id]?.[day.id];
+                    pdf.setFillColor(isBlocked ? 241 : assignment ? 240 : 255, isBlocked ? 245 : assignment ? 249 : 255, isBlocked ? 249 : 255);
+                    pdf.rect(cellX, currentY, dayColumnWidth, rowHeight, "FD");
+
+                    if (isBlocked) {
+                        pdf.setTextColor(2, 132, 199);
+                        pdf.setFont("helvetica", "bold");
+                        pdf.setFontSize(7);
+                        pdf.text(slot.title.toUpperCase(), cellX + (dayColumnWidth / 2), currentY + 8, { align: "center" });
+                    } else if (assignment) {
+                        pdf.setTextColor(15, 23, 42);
+                        pdf.setFont("helvetica", "bold");
+                        pdf.setFontSize(8);
+                        pdf.text(pdf.splitTextToSize(assignment.subject, dayColumnWidth - 4)[0], cellX + 2, currentY + 5.5);
+
+                        pdf.setTextColor(2, 132, 199);
+                        pdf.setFontSize(6.5);
+                        pdf.text(pdf.splitTextToSize(assignment.gradeSection, dayColumnWidth - 4)[0], cellX + 2, currentY + 10.5);
+                    } else {
+                        pdf.setTextColor(148, 163, 184);
+                        pdf.setFont("helvetica", "normal");
+                        pdf.setFontSize(7);
+                        pdf.text("FREE", cellX + (dayColumnWidth / 2), currentY + 8, { align: "center" });
+                    }
+                });
+
+                currentY += rowHeight;
+            });
+
+            const pageCount = pdf.getNumberOfPages();
+            for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
+                pdf.setPage(pageNumber);
+                pdf.setTextColor(100, 116, 139);
+                pdf.setFont("helvetica", "normal");
+                pdf.setFontSize(7);
+                pdf.text(`Page ${pageNumber} of ${pageCount}`, pageWidth - margin, pageHeight - 5, { align: "right" });
+            }
+
+            pdf.save(`${teacherName || "teacher"}-routine.pdf`);
+        } catch (error) {
+            console.error("Failed to generate teacher routine PDF", error);
+            setPdfError("The PDF could not be generated. Please refresh the page and try again.");
+        } finally {
+            setIsDownloadingPdf(false);
+        }
     };
 
     const isLoading = 
@@ -427,6 +579,20 @@ const ClientTeacherRoutinePage = () => {
                                                 </div>
                                             )}
 
+                                            <button
+                                                type="button"
+                                                onClick={handleDownloadPdf}
+                                                disabled={isDownloadingPdf}
+                                                className="flex items-center gap-2 rounded-xl bg-primary px-4 py-2 font-label text-sm text-on-primary transition-colors hover:bg-primary/90 active:scale-[0.98] disabled:cursor-wait disabled:opacity-70"
+                                            >
+                                                {isDownloadingPdf ? (
+                                                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                                                ) : (
+                                                    <Download className="h-4 w-4" />
+                                                )}
+                                                {isDownloadingPdf ? "Preparing PDF..." : "Download PDF"}
+                                            </button>
+
                                             {/* Print Button */}
                                             <button
                                                 type="button"
@@ -438,6 +604,12 @@ const ClientTeacherRoutinePage = () => {
                                             </button>
                                         </div>
                                     </div>
+
+                                    {pdfError && (
+                                        <div role="alert" className="rounded-xl border border-error/20 bg-error-container/20 p-3 text-sm text-error print:hidden">
+                                            {pdfError}
+                                        </div>
+                                    )}
 
                                     {/* Warnings Section (Over-scheduling detection) */}
                                     {exceededDays.length > 0 && (
@@ -504,10 +676,10 @@ const ClientTeacherRoutinePage = () => {
 
                                     {/* TIMETABLE ROUTINE GRID */}
                                     <div className="overflow-x-auto border border-outline-variant/20 rounded-2xl bg-surface shadow-inner">
-                                        <div className="min-w-[800px]">
+                                        <div className="min-w-[800px] bg-surface">
                                             {/* Header Row */}
                                             <div 
-                                                className="grid border-b border-outline-variant/30 bg-surface-container-low text-on-surface font-semibold"
+                                                className="pdf-routine-row grid border-b border-outline-variant/30 bg-surface-container-low text-on-surface font-semibold"
                                                 style={{ gridTemplateColumns }}
                                             >
                                                 <div className="px-4 py-3 font-label text-xs uppercase text-primary">Time Slot</div>
@@ -528,7 +700,7 @@ const ClientTeacherRoutinePage = () => {
                                                 return (
                                                     <div
                                                         key={slot.id}
-                                                        className={`grid border-b border-outline-variant/10 ${
+                                                        className={`pdf-routine-row grid border-b border-outline-variant/10 ${
                                                             isBlocked
                                                                 ? "schedule-stripes bg-surface-container-highest opacity-70"
                                                                 : "bg-surface-container-lowest"
